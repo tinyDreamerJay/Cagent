@@ -1,8 +1,8 @@
-﻿import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { MessageContent } from "./components/MessageContent";
-import { useConversations, Message, ToolCall } from "./hooks/useConversations";
+import { useConversations, type Message, type ToolCall } from "./hooks/useConversations";
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
   constructor(props: any) {
@@ -266,7 +266,7 @@ function App() {
         setMessages((prev) => {
           const next = [
             ...prev,
-            { id: `err-${Date.now()}`, role: "error", text: `閿熸枻鎷烽敓鏂ゆ嫹: ${msg}` },
+            { id: `err-${Date.now()}`, role: "error" as const, text: `閿熸枻鎷烽敓鏂ゆ嫹: ${msg}` },
           ];
           return next;
         });
@@ -432,8 +432,8 @@ function App() {
         <header className="chat-header">
           <span className="chat-header-title">
             {!connected ? "閿熸枻鎷?閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷?.." :
-             !initDone ? "閿熸枻鎷?閿熸枻鎷峰閿熸枻鎷烽敓鏂ゆ嫹..." :
-             apiKey ? "閿熸枻鎷?閿熸枻鎷烽敓鏂ゆ嫹" : "閿熸枻鎷?閿熸枻鎷疯 API Key"}
+             !initDone ? "閿熸枻鎷?閿熸枻鎷峰 閿熸枻鎷烽敓鏂ゆ嫹..." :
+             apiKey ? "閿熸枻鎷?閿熸枻鎷烽敓鏂ゆ嫹" : "閿熸枻鎷?閿熸枻鎷疯  API Key"}
           </span>
           {statusMsg && (
             <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8 }}>{statusMsg}</span>
@@ -449,14 +449,14 @@ function App() {
               <div className="welcome-icon">?</div>
               <div className="welcome-title">Cagent</div>
               <div className="welcome-text">
-                涓€閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷疯皨閿熸枻鎷?Agent閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷峰彇閿熸枻鎷峰啓閿熻銆侀敓娲佽緫閿熶茎纭锋嫹閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓绛嬨€                涓€閿熸枻鎷烽敓鏂ゆ嫹钀嶉敓鏂ゆ嫹閿熼樁銊楊澁鎷烽敓              </div>
+                涓€閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷疯皨閿熸枻鎷?Agent閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷峰彇閿熸枻鎷峰啓閿熻 銆侀敓娲佽緫閿熶茎纭锋嫹閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓绛嬨€                涓€閿熸枻鎷烽敓鏂ゆ嫹钀嶉敓鏂ゆ嫹閿熼樁銊楊澁鎷烽敓              </div>
               {!apiKey && initDone && (
                 <div style={{
                   marginTop: 16, padding: "10px 16px", background: "var(--bg-tertiary)",
                   border: "1px solid var(--warning)", borderRadius: "var(--radius)",
                   fontSize: 13, color: "var(--warning)", maxWidth: 400
                 }}>
-                  ?? 閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓鏂ゆ嫹閿?API Key閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓鐫嚖鎷蜂娇閿熸枻鎷                </div>
+                  ?? 閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓鏂ゆ嫹閿?API Key閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓鐫 嚖鎷蜂娇閿熸枻鎷                </div>
               )}
             </div>
           ) : (
@@ -547,9 +547,9 @@ function App() {
               className={`send-btn ${sending ? "sending" : ""}`}
               onClick={sending ? () => send("session:abort") : handleSend}
               disabled={(!input.trim() && pendingImagesRef.current.length === 0 && !sending) || !apiKey || !initDone}
-              title={sending ? "鍋滄" : "閿熸枻鎷烽敓鏂ゆ嫹"}
+              title={sending ? "鍋滄 " : "閿熸枻鎷烽敓鏂ゆ嫹"}
             >
-              {sending ? "閿熸枻鎷? : "閿熸枻鎷?}
+              {sending ? "?" : "?"}
             </button>
           </div>
         </div>
@@ -564,8 +564,3 @@ export default App;
 
 
 
-              </div>
-            </div>
-            <div ref={messagesEndRef} />
-          </div>
-          ))}

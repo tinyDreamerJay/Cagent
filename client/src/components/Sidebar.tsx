@@ -30,6 +30,35 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
       </div>
 
       <div className="sidebar-section">操作</div>
+      {sessions.length === 0 ? (
+        <div className="sidebar-item" style={{ cursor: "default", opacity: 0.4 }}>
+          暂无会话
+        </div>
+      ) : (
+        sessions.map((s) => (
+          <div
+            key={s.id}
+            className={`sidebar-item sidebar-session ${s.id === activeSession ? "active" : ""}`}
+            onClick={() => onSessionSelect(s.id)}
+          >
+            <span className="dot" />
+            <div className="sidebar-session-info">
+              <span className="sidebar-session-title">{s.name}</span>
+              <span className="sidebar-session-date">{s.date}</span>
+            </div>
+            <button
+              className="sidebar-session-delete"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSessionDelete(s.id);
+              }}
+              title="删除会话"
+            >
+              ×
+            </button>
+          </div>
+        ))
+      )}
       <button className="sidebar-item" onClick={onNewSession}>
         <span className="dot" style={{ background: "var(--success)" }} />
         新建会话
@@ -121,44 +150,4 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
       <div className="sidebar-footer">v1.0.0 · 极简</div>
     </aside>
   );
-}
- interface SidebarProps {
-   sessions: { id: string; name: string; date: string }[];
-   activeSession: string | null;
-   onSessionSelect: (id: string) => void;
-   onNewSession: () => void;
-   onSessionDelete: (id: string) => void;
-   apiKey: string;
-   provider: string;
-   availableProviders: string[];
-   onApiKeySet: (key: string, provider: string) => void;
- }
-       {sessions.length === 0 ? (
-         <div className="sidebar-item" style={{ cursor: "default", opacity: 0.4 }}>
-           暂无会话
-         </div>
-       ) : (
-         sessions.map((s) => (
-           <div
-             key={s.id}
-             className={`sidebar-item sidebar-session ${s.id === activeSession ? "active" : ""}`}
-             onClick={() => onSessionSelect(s.id)}
-           >
-             <span className="dot" />
-             <div className="sidebar-session-info">
-               <span className="sidebar-session-title">{s.name}</span>
-               <span className="sidebar-session-date">{s.date}</span>
-             </div>
-             <button
-               className="sidebar-session-delete"
-               onClick={(e) => {
-                 e.stopPropagation();
-                 onSessionDelete(s.id);
-               }}
-               title="删除会话"
-             >
-               ×
-             </button>
-           </div>
-         ))
-       )}
+}
