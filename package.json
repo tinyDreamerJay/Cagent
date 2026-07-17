@@ -1,0 +1,50 @@
+{
+  "name": "cagent",
+  "version": "1.0.0",
+  "description": "Cagent - A minimalist coding agent desktop client",
+  "private": true,
+  "main": "electron/main.cjs",
+  "scripts": {
+    "install:all": "cd server && npm install && cd ../client && npm install && cd .. && npm install",
+    "dev": "concurrently -n server,client,electron \"cd server && npm run dev\" \"cd client && npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "dev:electron": "electron . --dev",
+    "build": "cd client && npm run build",
+    "package": "npm run build && electron-builder"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "electron": "^43.1.1",
+    "electron-builder": "^25.1.0",
+    "wait-on": "^8.0.0"
+  },
+  "build": {
+    "appId": "com.cagent.app",
+    "productName": "Cagent",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/*.cjs",
+      "client/dist/**/*",
+      "node_modules/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": "dmg"
+    },
+    "win": {
+      "target": "dir"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.10",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "ws": "^8.21.1"
+  }
+}

@@ -1,0 +1,14 @@
+node_modules/
+.cache/
+logs.txt
+logs_err.txt
+*.log
+test_ws.js
+test_ws2.js
+fix_*.py
+fix_*.py
+.git/
+.vite/
+dist/
+release/
+client/dist/
