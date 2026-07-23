@@ -2,25 +2,28 @@
 
 ## 三层结构
 
-Cagent 由三个独立部分组成，有两种运行模式：
+Cagent 由 React 渲染进程、Electron 主进程和 pi RPC 子进程组成。`server/` 与 `electron/server.cjs` 保留为旧版 WebSocket 回退实现，桌面应用主链路不再依赖它们。
 
-### 开发模式
+### 当前桌面链路（主路径）
 
 ```
-浏览器 (localhost:5173)
-    │  WebSocket (ws://localhost:4120)
+React GUI（Electron renderer）
+    │  Electron IPC（contextBridge）
     ▼
-server/src/ (Express + ws)
-    │  pi SDK
+Electron 主进程
+    │  JSON Lines stdin/stdout RPC
     ▼
-AI 模型 (Anthropic / OpenAI)
+pi-coding-agent runtime
+    │  providers / auth / tools / skills / MCP / extensions / sessions
+    ▼
+AI 模型（pi 支持的 provider）
 ```
 
-- `client/` — Vite 开发服务器，端口 5173
-- `server/` — tsx watch 热重载，端口 4120
-- 两者通过 WebSocket 直连
+- 开发时 Electron 加载 `http://localhost:5173`，生产时加载 `client/dist/index.html`
+- Electron 主进程负责启动、停止和重启 pi RPC，并将事件转发给 renderer
+- `electron/ccswitch-provider.cjs` 通过 pi extension 注入 ccswitch provider
 
-### 桌面应用模式（打包后）
+### 旧版兼容链路
 
 ```
 Electron 窗口
@@ -33,9 +36,9 @@ electron/server.cjs (内嵌 server，fork 子进程)
 AI 模型
 ```
 
-- Electron 主进程 fork `server.cjs` 作为子进程
-- `server.cjs` 是一个独立的 CJS 文件，包含了 Express + WebSocket + pi SDK
-- 前端静态文件从 `client/dist/` 加载
+- `server/src/` 提供 Express + WebSocket 开发服务
+- `electron/server.cjs` 是对应的 CJS 内嵌版本
+- 仅在需要兼容旧客户端或排查回归时使用，不应继续向其中添加新的 pi 能力
 
 ## 前端：React + TypeScript + Vite
 
@@ -64,30 +67,36 @@ App
 | `streaming` | `boolean` | 是否正在接收流式 token |
 | `apiKey` | `string` | 用户 API Key（localStorage 持久化） |
 | `initDone` | `boolean` | 服务端初始化是否完成 |
-| `connected` | `boolean` | WebSocket 连接状态 |
+| `connected` | `boolean` | Electron IPC bridge 是否可用 |
 
-### WebSocket 通信
+### Electron IPC 通信
 
-统一通过 `useWebSocket` hook：
+统一通过 `useWebSocket` hook（保留旧 API 名称以减少 UI 改动）：
 
-- `send(type, payload)` — 发送消息
-- `subscribe(type, handler)` — 订阅消息类型，返回取消订阅函数
-- 自动重连（断开后 2 秒）
+- `send(type, payload)` — 调用 preload 暴露的 `window.cagent.pi.send`
+- `subscribe(type, handler)` — 订阅主进程转发的事件
+- 不在 renderer 中直接连接端口或访问 Node.js API
 
-## 后端：WebSocket 消息协议
+## pi RPC 协议适配
 
-### 客户端 → 服务端
+### GUI → 主进程 → pi
 
 | type | payload | 说明 |
 |------|---------|------|
-| `session:init` | `{}` | 初始化会话（触发 pi SDK 加载） |
-| `session:prompt` | `{ text }` | 发送用户消息 |
-| `session:abort` | `{}` | 中止当前回复 |
-| `auth:set-key` | `{ provider, apiKey }` | 设置 API Key |
-| `auth:providers` | `{}` | 查询可用提供商 |
-| `session:list` | `{}` | 获取会话列表（暂未实现） |
+| `session:init` | `{}` | 查询 pi 状态和可用模型 |
+| `session:prompt` | `{ text, model, images? }` | 调用 pi `prompt` |
+| `session:abort` | `{}` | 调用 pi `abort` |
+| `session:new` | `{}` | 调用 pi `new_session` 并刷新运行状态 |
+| `session:list` | `{}` | 读取当前项目的 pi 持久化会话列表 |
+| `session:switch` | `{ path }` | 校验并调用 pi `switch_session`，加载该会话历史 |
+| `session:set-thinking` | `{ level }` | 调用 pi `set_thinking_level` |
+| `session:set-auto-compaction` | `{ enabled }` | 更新 pi 自动压缩开关 |
+| `session:compact` | `{}` | 调用 pi `compact` 压缩当前上下文 |
+| `session:stats` | `{}` | 查询当前 pi 会话统计信息 |
+| `auth:set-key` | `{ provider, apiKey }` | 更新运行时凭据并重启 pi RPC |
+| `auth:providers` | `{}` | 查询 pi 可用 provider |
 
-### 服务端 → 客户端
+### pi 事件 → GUI
 
 | type | payload | 说明 |
 |------|---------|------|
@@ -96,31 +105,37 @@ App
 | `message:user` | `{ text }` | 用户消息回显 |
 | `message:done` | `{}` | 回复完成 |
 | `message:aborted` | `{}` | 回复被中止 |
+| `session:state` | `{ sessionId, sessionName?, thinkingLevel, autoCompactionEnabled, messageCount, cwd, ... }` | 当前 pi 会话运行状态 |
+| `session:list` | `PiSession[]` | 当前项目的 pi 持久化会话，`id` 与 `path` 都是会话文件路径 |
+| `session:messages` | `Message[]` | 当前 pi 会话的已持久化用户和助手消息 |
+| `session:thinking-levels` | `string[]` | 当前模型支持的思考等级 |
+| `session:stats` | `SessionStats` | 当前 pi 会话统计信息 |
 | `tool:call` | `{ name, params }` | 工具调用开始 |
 | `tool:result` | `{ name, output }` | 工具调用结果 |
-| `auth:key-ready` | `{ provider, models }` | API Key 设置成功 |
+| `auth:key-ready` | `{ provider, models, source? }` | provider 已有可用凭据 |
 | `auth:providers` | `string[]` | 可用提供商列表 |
 | `error` | `{ message }` | 错误消息 |
+
+其余未专门映射的 pi 事件通过 `pi:event` 转发，扩展 UI 请求通过 `pi:extension-ui` 转发。
 
 ## pi SDK 集成
 
 ### 初始化流程
 
-1. `import("@earendil-works/pi-coding-agent")` — ESM 动态导入
-2. `pi.SessionManager.inMemory()` — 创建内存会话管理器
-3. `pi.ModelRuntime.create()` — 初始化模型运行时（加载配置、模型目录）
-4. `modelRuntime.setRuntimeApiKey("anthropic", apiKey)` — 设置 API Key
-5. `modelRuntime.getAvailable("anthropic")` — 刷新可用模型列表
+1. Electron 启动 `dist/rpc-entry.js --mode rpc`
+2. pi 自己加载 `~/.pi/agent`、provider、认证、Skills、MCP 和 Extensions
+3. ccswitch 配置通过 extension 和环境变量注入，不复制到 renderer
+4. GUI 通过 `get_state`、`get_available_models` 等 RPC 命令初始化
 
 ### 发送 prompt 流程
 
-1. `pi.createAgentSession({ sessionManager, modelRuntime, model, cwd })` — 创建 agent 会话
-2. `session.prompt(text, { signal, onToken, onToolCall, onToolResult })` — 发送消息
-3. 回调函数将结果通过 WebSocket 推送到前端
+1. 主进程发送 `{ type: "prompt", message, images }`
+2. pi 通过 stdout 输出 `message_update`、工具事件和 `agent_settled`
+3. 主进程把这些事件映射为 renderer 使用的 `token`、`tool:*` 和 `message:done`
 
 ## 重要约束
 
 - **不要引入 React Router**：当前只有一个聊天视图，无需路由
-- **electron/server.cjs 与 server/src/ 保持同步**：两者功能一致，只是模块格式不同（CJS vs ESM）
+- **旧版 server 不新增主链路能力**：`electron/server.cjs` 与 `server/src/` 仅用于兼容回退
 - **error payload 必须是 `{ message: string }`**：前端错误处理依赖此格式
-- **API Key 通过 `setRuntimeApiKey` 设置**：不要直接操作 credential store
+- **API Key 通过主进程运行时覆盖注入 pi**：不要把密钥发送到 renderer 之外的第三方服务，也不要直接操作 credential store

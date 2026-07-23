@@ -11,9 +11,11 @@
     "dev:client": "cd client && npm run dev",
     "dev:electron": "electron . --dev",
     "build": "cd client && npm run build",
-    "package": "npm run build && electron-builder"
+    "package": "npm run build && electron-builder",
+    "generate:icon": "electron scripts/generate-icon.cjs"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "concurrently": "^9.1.0",
     "electron": "^43.1.1",
     "electron-builder": "^25.1.0",
@@ -27,6 +29,8 @@
     },
     "files": [
       "electron/*.cjs",
+      "electron/icon.svg",
+      "electron/icon.ico",
       "client/dist/**/*",
       "node_modules/**/*"
     ],
@@ -35,14 +39,16 @@
       "target": "dmg"
     },
     "win": {
-      "target": "dir"
+      "target": "dir",
+      "icon": "electron/icon.ico",
+      "signAndEditExecutable": false
     },
     "linux": {
       "target": "AppImage"
     }
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.10",
+    "@earendil-works/pi-coding-agent": "0.81.1",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "ws": "^8.21.1"

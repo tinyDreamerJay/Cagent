@@ -1,5 +1,14 @@
 import { WebSocket } from "ws";
 
+function getProviderIds(rt: any): string[] {
+  const ids = new Set<string>();
+  for (const provider of rt?.getProviders?.() || []) {
+    if (provider?.id) ids.add(provider.id);
+  }
+  for (const id of rt?.getRegisteredProviderIds?.() || []) ids.add(id);
+  return [...ids];
+}
+
 export class CagentSession {
   public id: string;
   private ws: WebSocket;
@@ -24,7 +33,7 @@ export class CagentSession {
   }
 
   getRegisteredProviderIds(): string[] {
-    return this.modelRuntime.getRegisteredProviderIds();
+    return getProviderIds(this.modelRuntime);
   }
 
   getAvailableModels(provider: string) {
@@ -40,7 +49,7 @@ export class CagentSession {
 
     const providers = provider
       ? [provider]
-      : this.modelRuntime.getRegisteredProviderIds();
+      : getProviderIds(this.modelRuntime);
 
     for (const pid of providers) {
       const available = await this.modelRuntime.getAvailable(pid);
@@ -70,7 +79,7 @@ export class CagentSession {
     this.agentSession = null;
   }
 
-  async prompt(text: string, options?: { images?: any[]; signal?: AbortSignal; modelId?: string }) {
+  async prompt(text: string, options?: { images?: any[]; signal?: AbortSignal; modelId?: string; cwd?: string }) {
     if (!this.modelRuntime || !this.sessionManager) {
       this.send("error", { message: "浼氳瘽鏈垵濮嬪寲" });
       return;
@@ -97,7 +106,7 @@ export class CagentSession {
         // Resolve model: prefer explicit modelId, fallback to cached/default
         let model: any;
         if (options?.modelId) {
-          const providers = this.modelRuntime.getRegisteredProviderIds();
+          const providers = getProviderIds(this.modelRuntime);
           for (const pid of providers) {
             const available = await this.modelRuntime.getAvailable(pid);
             const found = available.find((m: any) => m.id === options.modelId);
@@ -115,11 +124,12 @@ export class CagentSession {
           this.send("error", { message: "没有可用模型，请检查 API Key 是否正确" });
           return;
         }
+        const targetCwd = options?.cwd || process.cwd();
         const { session } = await pi.createAgentSession({
           sessionManager: this.sessionManager,
           modelRuntime: this.modelRuntime,
           model,
-          cwd: process.cwd(),
+          cwd: targetCwd,
         });
         this.agentSession = session;
       }
@@ -153,11 +163,11 @@ const images = (options?.images || []).map((img: any) => ({
               this.send("token", { text: ev.delta });
               return;
             }
-            if (ev.type === "toolcall_start") {
-              anyOutput = true;
-              currentToolName = ev.toolName || "";
-              this.send("tool:call", {
-                name: ev.toolName,
+          if (ev.type === "toolcall_start") {
+            anyOutput = true;
+            currentToolName = ev.toolName || "tool";
+            this.send("tool:call", {
+              name: currentToolName,
                 params: "(streaming...)",
               });
               return;
@@ -170,9 +180,9 @@ const images = (options?.images || []).map((img: any) => ({
           // Handle tool execution events
           if (event.type === "tool_execution_start") {
             anyOutput = true;
-            currentToolName = event.toolName || "";
+            currentToolName = event.toolName || "tool";
             this.send("tool:call", {
-              name: event.toolName,
+              name: currentToolName,
               params: JSON.stringify(event.args || {}, null, 2),
             });
             return;

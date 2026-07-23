@@ -1,6 +1,9 @@
 // Cagent embedded server (runs as child process of Electron)
 const express = require("express");
 const cors = require("cors");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const { WebSocketServer, WebSocket } = require("ws");
 const { createServer: createHttpServer } = require("http");
 
@@ -22,6 +25,71 @@ async function getPiSDK() {
   return piSDK;
 }
 
+// getRegisteredProviderIds() only contains extension providers. Include all
+// built-in pi-agent providers so ccswitch/API configurations can be selected.
+function getProviderIds(rt) {
+  const ids = new Set();
+  for (const provider of (rt?.getProviders?.() || [])) {
+    if (provider?.id) ids.add(provider.id);
+  }
+  for (const id of (rt?.getRegisteredProviderIds?.() || [])) ids.add(id);
+  return [...ids];
+}
+
+async function sendConfiguredProviderStates(ws, rt, ids) {
+  for (const provider of ids) {
+    try {
+      const status = rt.getProviderAuthStatus?.(provider);
+      if (!status?.configured) continue;
+      const models = await rt.getAvailable(provider);
+      if (models.length > 0) {
+        ws.send(JSON.stringify({
+          type: "auth:key-ready",
+          payload: { provider, models: models.map(m => m.id), source: status.source },
+        }));
+      }
+    } catch (_) {
+      // Keep listing the provider; the user can configure it from the UI.
+    }
+  }
+}
+
+function loadCcswitchCodexConfig() {
+  try {
+    const home = os.homedir();
+    const text = fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8");
+    const providerId = text.match(/^model_provider\s*=\s*["']([^"']+)["']/m)?.[1];
+    const modelId = text.match(/^model\s*=\s*["']([^"']+)["']/m)?.[1] || "gpt-5";
+    if (!providerId) return null;
+    const escaped = providerId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const section = text.match(new RegExp(`\\[model_providers\\.${escaped}\\]([\\s\\S]*?)(?=\\n\\[|$)`))?.[1] || "";
+    const baseUrl = section.match(/^base_url\s*=\s*["']([^"']+)["']/m)?.[1];
+    if (!baseUrl) return null;
+    let apiKey;
+    try {
+      const auth = JSON.parse(fs.readFileSync(path.join(home, ".codex", "auth.json"), "utf8"));
+      apiKey = auth.OPENAI_API_KEY || auth.api_key;
+    } catch (_) {}
+    return { providerId, modelId, baseUrl, apiKey, wireApi: section.match(/^wire_api\s*=\s*["']([^"']+)["']/m)?.[1] };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function registerCcswitchProvider(rt) {
+  const cfg = loadCcswitchCodexConfig();
+  if (!cfg) return;
+  const api = cfg.wireApi === "responses" ? "openai-responses" : "openai-completions";
+  rt.registerProvider(cfg.providerId, {
+    name: `ccswitch: ${cfg.providerId}`,
+    baseUrl: cfg.baseUrl,
+    api,
+    models: [{ id: cfg.modelId, name: cfg.modelId, api, reasoning: true, input: ["text"], contextWindow: 1000000, maxTokens: 32768, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
+  });
+  if (cfg.apiKey) await rt.setRuntimeApiKey(cfg.providerId, cfg.apiKey);
+  console.log(`[Cagent] ccswitch Codex provider imported: ${cfg.providerId}`);
+}
+
 // Session manager
 let sessionManager = null;
 let modelRuntime = null;
@@ -32,6 +100,7 @@ function registerDeepSeekProvider(rt) {
   rt.registerProvider("deepseek", {
     name: "DeepSeek",
     baseUrl: "https://api.deepseek.com/v1",
+    apiKey: "$CAGENT_DEEPSEEK_API_KEY",
     api: "openai-completions",
     models: [
       {
@@ -68,6 +137,7 @@ async function initSession() {
     // Register DeepSeek as a custom provider
     try {
       registerDeepSeekProvider(modelRuntime);
+      await registerCcswitchProvider(modelRuntime);
       console.log("[Cagent] DeepSeek provider registered");
     } catch (err) {
       console.log("[Cagent] Failed to register DeepSeek:", err.message);
@@ -95,7 +165,7 @@ wss.on("connection", (ws) => {
             console.log("[Cagent] session:init done");
             // Try to cache a model after initialization
             try {
-              const providers = modelRuntime.getRegisteredProviderIds();
+              const providers = getProviderIds(modelRuntime);
               for (const pid of providers) {
                 const available = await modelRuntime.getAvailable(pid);
                 if (available.length > 0) {
@@ -129,7 +199,7 @@ wss.on("connection", (ws) => {
             const modelChanged = payload.model && resolvedModel && payload.model !== resolvedModel.id;
             if (!resolvedModel || modelChanged) {
               if (payload.model) {
-                const providers = modelRuntime.getRegisteredProviderIds();
+                const providers = getProviderIds(modelRuntime);
                 for (const pid of providers) {
                   const available = await modelRuntime.getAvailable(pid);
                   const found = available.find(m => m.id === payload.model);
@@ -141,7 +211,7 @@ wss.on("connection", (ws) => {
                 }
               }
               if (!resolvedModel) {
-                const providers = modelRuntime.getRegisteredProviderIds();
+                const providers = getProviderIds(modelRuntime);
                 for (const pid of providers) {
                   const available = await modelRuntime.getAvailable(pid);
                   if (available.length > 0) {
@@ -159,15 +229,17 @@ wss.on("connection", (ws) => {
               agentSession = null;
             }
 
-            // Reuse agent session if already created
-            if (!agentSession) {
-              console.log("[Cagent] Creating agent session...");
+            // Reuse agent session if already created (recreate if cwd changed)
+            const targetCwd = payload.cwd || process.cwd();
+            if (!agentSession || agentSession._cwd !== targetCwd) {
+              console.log("[Cagent] Creating agent session... cwd:", targetCwd);
               const { session } = await pi.createAgentSession({
                 sessionManager,
                 modelRuntime,
                 model: resolvedModel,
-                cwd: process.cwd(),
+                cwd: targetCwd,
               });
+              session._cwd = targetCwd;
               agentSession = session;
               console.log("[Cagent] Agent session created");
             }
@@ -183,11 +255,8 @@ wss.on("connection", (ws) => {
             // Send a thinking indicator
             ws.send(JSON.stringify({ type: "token", payload: { text: "" } }));
 
-            // Create AbortController for this prompt
+            // Create AbortController for this prompt (no hard timeout — let pi decide)
             abortCtrl = new AbortController();
-            const promptTimeout = setTimeout(() => {
-              try { abortCtrl?.abort(); } catch(e) {}
-            }, 30000);
 
             let currentToolName = "";
             let anyOutput = false;
@@ -215,10 +284,10 @@ wss.on("connection", (ws) => {
                   // Tool call streaming
                   if (ev.type === "toolcall_start") {
                     anyOutput = true;
-                    currentToolName = ev.toolName || "";
+                    currentToolName = ev.toolName || "tool";
                     ws.send(JSON.stringify({
                       type: "tool:call",
-                      payload: { name: ev.toolName, params: "(streaming...)" },
+                      payload: { name: currentToolName, params: "(streaming...)" },
                     }));
                     return;
                   }
@@ -231,10 +300,10 @@ wss.on("connection", (ws) => {
                 // Handle tool execution events
                 if (event.type === "tool_execution_start") {
                   anyOutput = true;
-                  currentToolName = event.toolName || "";
+                  currentToolName = event.toolName || "tool";
                   ws.send(JSON.stringify({
                     type: "tool:call",
-                    payload: { name: event.toolName, params: JSON.stringify(event.args || {}, null, 2) },
+                    payload: { name: currentToolName, params: JSON.stringify(event.args || {}, null, 2) },
                   }));
                   return;
                 }
@@ -270,7 +339,6 @@ wss.on("connection", (ws) => {
               signal: abortCtrl.signal,
             });
 
-            clearTimeout(promptTimeout);
             unsub();
 
             if (!anyOutput) {
@@ -278,8 +346,6 @@ wss.on("connection", (ws) => {
             }
             ws.send(JSON.stringify({ type: "message:done", payload: {} }));
           } catch (err) {
-            clearTimeout(promptTimeout);
-            clearTimeout(promptTimeout);
             console.error("[Cagent] prompt error full:", err);
             console.log("[Cagent] prompt error:", err.name, err.message);
             console.log("[Cagent] prompt error stack:", err.stack?.slice(0, 500));
@@ -313,7 +379,7 @@ wss.on("connection", (ws) => {
           }
           try {
             // Check if provider exists, if not try to register
-            const registered = modelRuntime.getRegisteredProviderIds();
+            const registered = getProviderIds(modelRuntime);
             console.log("[Cagent] Registered providers:", registered);
             if (!registered.includes(provider)) {
               console.log("[Cagent] Provider not found:", provider);
@@ -340,8 +406,9 @@ wss.on("connection", (ws) => {
 
         case "auth:providers": {
           if (modelRuntime) {
-            const providers = modelRuntime.getRegisteredProviderIds();
+            const providers = getProviderIds(modelRuntime);
             ws.send(JSON.stringify({ type: "auth:providers", payload: providers }));
+            await sendConfiguredProviderStates(ws, modelRuntime, providers);
           } else {
             // Before init, just return the common ones
             ws.send(JSON.stringify({ type: "auth:providers", payload: ["anthropic", "openai"] }));

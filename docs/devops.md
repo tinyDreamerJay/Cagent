@@ -56,12 +56,16 @@ npm run package    # electron-builder 打包
     "client/dist/**/*",
     "node_modules/**/*"
   ],
-  "win": { "target": "dir" }
+  "win": {
+    "target": "dir",
+    "signAndEditExecutable": false
+  }
 }
 ```
 
-- `target: "dir"` 仅生成解包目录，不生成 NSIS 安装包
-- 原因：Windows 上 electron-builder 解压 winCodeSign 时符号链接权限报错
+- `target: "dir"` 仅生成解包目录，不生成 NSIS 安装包。
+- `signAndEditExecutable: false` 让目录版不依赖下载 `winCodeSign`；当前发布流程不做 Windows 代码签名或 EXE 资源编辑。
+- 因此应用图标以 `electron/icon.svg` 和网页图标为准，Windows EXE 的资源图标不作为发布验证条件。
 
 ## 已知问题
 
@@ -74,7 +78,7 @@ ERROR: Cannot create symbolic link : 客户端没有所需的特权
 electron-builder 打包时下载的 winCodeSign 压缩包包含 macOS 符号链接，
 Windows 上解压会失败。**不影响 asar 打包**，只是无法生成安装包。
 
-当前对策：使用 `target: "dir"` 跳过安装包步骤。
+当前对策：使用 `target: "dir"` 和 `signAndEditExecutable: false`，跳过安装包步骤以及对 EXE 的签名/资源编辑。
 
 ### Vite base 路径
 

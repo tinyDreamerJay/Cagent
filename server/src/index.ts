@@ -1,5 +1,8 @@
 import express from "express";
 import cors from "cors";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
 import { CagentSession } from "./session.js";
@@ -24,10 +27,75 @@ async function getPiSDK() {
   return piSDK;
 }
 
+// ModelRuntime.getRegisteredProviderIds() only contains extension providers.
+// Include pi-agent's built-in providers as well (Anthropic, OpenAI, etc.).
+function getProviderIds(rt: any): string[] {
+  const ids = new Set<string>();
+  for (const provider of rt?.getProviders?.() || []) {
+    if (provider?.id) ids.add(provider.id);
+  }
+  for (const id of rt?.getRegisteredProviderIds?.() || []) ids.add(id);
+  return [...ids];
+}
+
+async function sendConfiguredProviderStates(ws: WebSocket, rt: any, ids: string[]) {
+  for (const provider of ids) {
+    try {
+      const status = rt.getProviderAuthStatus?.(provider);
+      if (!status?.configured) continue;
+      const models = await rt.getAvailable(provider);
+      if (models.length > 0) {
+        ws.send(JSON.stringify({
+          type: "auth:key-ready",
+          payload: { provider, models: models.map((m: any) => m.id), source: status.source },
+        }));
+      }
+    } catch {
+      // A provider without usable credentials is still listed and can be configured manually.
+    }
+  }
+}
+
+function loadCcswitchCodexConfig() {
+  try {
+    const home = os.homedir();
+    const configText = fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8");
+    const providerId = configText.match(/^model_provider\s*=\s*["']([^"']+)["']/m)?.[1];
+    const modelId = configText.match(/^model\s*=\s*["']([^"']+)["']/m)?.[1] || "gpt-5";
+    if (!providerId) return null;
+    const section = configText.match(new RegExp(`\\[model_providers\\.${providerId.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\]([\\s\\S]*?)(?=\\n\\[|$)`))?.[1] || "";
+    const baseUrl = section.match(/^base_url\s*=\s*["']([^"']+)["']/m)?.[1];
+    if (!baseUrl) return null;
+    let apiKey: string | undefined;
+    try {
+      const auth = JSON.parse(fs.readFileSync(path.join(home, ".codex", "auth.json"), "utf8"));
+      apiKey = auth.OPENAI_API_KEY || auth.api_key;
+    } catch { /* auth can still be entered in the UI */ }
+    return { providerId, modelId, baseUrl, apiKey, wireApi: section.match(/^wire_api\s*=\s*["']([^"']+)["']/m)?.[1] };
+  } catch {
+    return null;
+  }
+}
+
+async function registerCcswitchProvider(rt: any) {
+  const cfg = loadCcswitchCodexConfig();
+  if (!cfg) return;
+  const api = cfg.wireApi === "responses" ? "openai-responses" : "openai-completions";
+  rt.registerProvider(cfg.providerId, {
+    name: `ccswitch: ${cfg.providerId}`,
+    baseUrl: cfg.baseUrl,
+    api,
+    models: [{ id: cfg.modelId, name: cfg.modelId, api, reasoning: true, input: ["text"], contextWindow: 1000000, maxTokens: 32768, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
+  });
+  if (cfg.apiKey) await rt.setRuntimeApiKey(cfg.providerId, cfg.apiKey);
+  console.log(`[Cagent] ccswitch Codex provider imported: ${cfg.providerId}`);
+}
+
 function registerDeepSeekProvider(rt: any) {
   rt.registerProvider("deepseek", {
     name: "DeepSeek",
     baseUrl: "https://api.deepseek.com/v1",
+    apiKey: "$CAGENT_DEEPSEEK_API_KEY",
     api: "openai-completions",
     models: [
       {
@@ -63,6 +131,7 @@ async function initSession() {
     modelRuntime = await pi.ModelRuntime.create();
     try {
       registerDeepSeekProvider(modelRuntime);
+      await registerCcswitchProvider(modelRuntime);
       console.log("[Cagent] DeepSeek provider registered");
     } catch (err: any) {
       console.log("[Cagent] Failed to register DeepSeek:", err.message);
@@ -99,7 +168,7 @@ wss.on("connection", (ws: WebSocket) => {
             ws.send(JSON.stringify({ type: "error", payload: { message: "没有活跃的会话" } }));
             return;
           }
-          await currentSession.prompt(payload.text, { modelId: payload.model, images: payload.images });
+          await currentSession.prompt(payload.text, { modelId: payload.model, images: payload.images, cwd: payload.cwd });
           break;
         }
 
@@ -115,7 +184,7 @@ wss.on("connection", (ws: WebSocket) => {
 
         case "model:list": {
           if (modelRuntime) {
-            const providers = modelRuntime.getRegisteredProviderIds();
+            const providers = getProviderIds(modelRuntime);
             const all: any[] = [];
             for (const pid of providers) {
               const available = await modelRuntime.getAvailable(pid);
@@ -142,7 +211,7 @@ wss.on("connection", (ws: WebSocket) => {
           }
           try {
             // Check if provider is registered
-            const registered = modelRuntime.getRegisteredProviderIds();
+            const registered = getProviderIds(modelRuntime);
             if (!registered.includes(provider)) {
               ws.send(JSON.stringify({ type: "error", payload: { message: `鏈煡鎻愪緵鍟?${provider}，可用: ${registered.join(", ")}` } }));
               return;
@@ -162,8 +231,9 @@ wss.on("connection", (ws: WebSocket) => {
 
         case "auth:providers": {
           if (modelRuntime) {
-            const providers = modelRuntime.getRegisteredProviderIds();
+            const providers = getProviderIds(modelRuntime);
             ws.send(JSON.stringify({ type: "auth:providers", payload: providers }));
+            await sendConfiguredProviderStates(ws, modelRuntime, providers);
           } else {
             ws.send(JSON.stringify({ type: "auth:providers", payload: ["deepseek"] }));
           }

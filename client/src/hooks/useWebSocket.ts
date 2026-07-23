@@ -5,94 +5,56 @@ export type WsMessage = {
   payload: any;
 };
 
+type CagentBridge = {
+  pi?: {
+    send: (type: string, payload?: any) => void;
+    onEvent: (handler: (message: WsMessage) => void) => () => void;
+    isAvailable?: boolean;
+  };
+};
+
+declare global {
+  interface Window {
+    cagent?: CagentBridge;
+  }
+}
+
 export function useWebSocket() {
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const [connected, setConnected] = useState(false);
   const listenersRef = useRef<Map<string, Set<(payload: any) => void>>>(new Map());
 
-  const connect = useCallback(() => {
-    if (!mountedRef.current) return;
-    // Close existing connection first
-    if (wsRef.current) {
-      wsRef.current.onclose = null;
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    // Clear any pending reconnect
-    if (reconnectRef.current) {
-      clearTimeout(reconnectRef.current);
-      reconnectRef.current = null;
-    }
-
-    const ws = new WebSocket("ws://localhost:4120");
-
-    ws.onopen = () => {
-      if (!mountedRef.current) { ws.close(); return; }
-      setConnected(true);
-      wsRef.current = ws;
-      ws.send(JSON.stringify({ type: "session:init", payload: {} }));
-    };
-
-    ws.onmessage = (event) => {
-      if (!mountedRef.current) return;
-      try {
-        const msg: WsMessage = JSON.parse(event.data);
-        const handlers = listenersRef.current.get(msg.type);
-        if (handlers) {
-          handlers.forEach((fn) => fn(msg.payload));
-        }
-      } catch {}
-    };
-
-    ws.onclose = () => {
-      if (!mountedRef.current) return;
-      // Only handle close for the current socket
-      if (wsRef.current !== ws) return;
+  useEffect(() => {
+    mountedRef.current = true;
+    const bridge = window.cagent?.pi;
+    if (!bridge) {
       setConnected(false);
-      wsRef.current = null;
-      // Auto-reconnect after 2s
-      reconnectRef.current = setTimeout(() => connect(), 2000);
-    };
-
-    ws.onerror = () => {
-      ws.close();
+      return () => { mountedRef.current = false; };
+    }
+    setConnected(true);
+    const unsubscribe = bridge.onEvent((message) => {
+      if (!mountedRef.current) return;
+      const handlers = listenersRef.current.get(message.type);
+      handlers?.forEach((handler) => handler(message.payload));
+    });
+    const initTimer = window.setTimeout(() => bridge.send("session:init"), 0);
+    return () => {
+      mountedRef.current = false;
+      window.clearTimeout(initTimer);
+      unsubscribe();
+      setConnected(false);
     };
   }, []);
 
   const send = useCallback((type: string, payload?: any) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type, payload }));
-    }
+    window.cagent?.pi?.send(type, payload);
   }, []);
 
   const subscribe = useCallback((type: string, handler: (payload: any) => void) => {
-    if (!listenersRef.current.has(type)) {
-      listenersRef.current.set(type, new Set());
-    }
+    if (!listenersRef.current.has(type)) listenersRef.current.set(type, new Set());
     listenersRef.current.get(type)!.add(handler);
-    return () => {
-      listenersRef.current.get(type)?.delete(handler);
-    };
+    return () => listenersRef.current.get(type)?.delete(handler);
   }, []);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    connect();
-    return () => {
-      mountedRef.current = false;
-      if (reconnectRef.current) {
-        clearTimeout(reconnectRef.current);
-        reconnectRef.current = null;
-      }
-      if (wsRef.current) {
-        wsRef.current.onclose = null;
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-    };
-  }, [connect]);
 
   return { connected, send, subscribe };
 }
