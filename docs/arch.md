@@ -40,6 +40,10 @@ AI 模型
 - `electron/server.cjs` 是对应的 CJS 内嵌版本
 - 仅在需要兼容旧客户端或排查回归时使用，不应继续向其中添加新的 pi 能力
 
+## 工作台服务
+
+桌面工作台通过 `preload.cjs` 暴露最小 `workspace` IPC。文件树、预览、Git 状态和终端请求均由 Electron 主进程执行；路径会解析并限制在当前 `cwd` 内，`release`、`.git` 和 `node_modules` 不作为默认项目内容展示。Git 写入、分支创建、提交和终端命令先返回审批请求，renderer 不接触 Node API。
+
 ## 前端：React + TypeScript + Vite
 
 ### 组件树

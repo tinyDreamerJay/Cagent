@@ -13,4 +13,8 @@ contextBridge.exposeInMainWorld("cagent", {
     },
     isAvailable: true,
   },
+  workspace: {
+    request(type, payload) { return ipcRenderer.invoke("workspace:request", { type, payload }); },
+    onEvent(handler) { const listener = (_event, message) => handler(message); ipcRenderer.on("workspace:event", listener); return () => ipcRenderer.removeListener("workspace:event", listener); },
+  },
 });

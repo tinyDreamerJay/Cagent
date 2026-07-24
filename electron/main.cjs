@@ -3,7 +3,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { pathToFileURL } = require("url");
-const { spawn } = require("child_process");
+const { spawn, execFile } = require("child_process");
 
 // Suppress EPIPE errors when running with piped stdio
 process.stdout.on("error", () => {});
@@ -210,6 +210,42 @@ function handlePiLine(line) {
 }
 
 let currentCwd = process.cwd();
+
+function resolveWorkspacePath(input = ".") {
+  const root = path.resolve(currentCwd);
+  const target = path.resolve(root, String(input));
+  if (target !== root && !target.startsWith(root + path.sep)) throw new Error("路径超出当前工作目录边界");
+  return target;
+}
+function workspaceApproval(type, payload) {
+  sendToRenderer("workspace:approval", { id: `approval-${Date.now()}`, type, payload });
+  return { approved: false, requiresApproval: true };
+}
+function runGit(args) {
+  return new Promise((resolve, reject) => execFile("git", args, { cwd: currentCwd, windowsHide: true, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => error ? reject(new Error(stderr || error.message)) : resolve(stdout)));
+}
+
+ipcMain.handle("workspace:request", async (_event, message) => {
+  const type = message?.type;
+  const p = message?.payload || {};
+  if (type === "root") return { cwd: currentCwd };
+  if (type === "list") {
+    const dir = resolveWorkspacePath(p.path || ".");
+    const entries = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => ![".git", "node_modules", "release"].includes(e.name)).sort((a,b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
+    return { path: path.relative(currentCwd, dir) || ".", entries: entries.map((e) => ({ name: e.name, directory: e.isDirectory() })) };
+  }
+  if (type === "read") { const file = resolveWorkspacePath(p.path); const stat = fs.statSync(file); if (stat.size > 1024 * 1024) throw new Error("文件过大，拒绝预览"); return { path: p.path, content: fs.readFileSync(file, "utf8") }; }
+  if (type === "git-status") return { status: await runGit(["status", "--short"]), branch: String(await runGit(["branch", "--show-current"])).trim(), diff: await runGit(["diff", "--stat"]) };
+  if (["git-stage", "git-commit", "git-branch"].includes(type)) return workspaceApproval(type, p);
+  if (type === "terminal") return workspaceApproval(type, { command: String(p.command || "") });
+  if (type === "approve") {
+    if (p.type === "git-stage") return { output: await runGit(["add", "--", ...(p.paths || [])]) };
+    if (p.type === "git-commit") return { output: await runGit(["commit", "-m", String(p.message || "Update")]) };
+    if (p.type === "git-branch") return { output: await runGit(["switch", "-c", String(p.name || "codex/workspace")]) };
+    if (p.type === "terminal") return new Promise((resolve) => { const child = spawn(process.platform === "win32" ? "cmd.exe" : "sh", process.platform === "win32" ? ["/d", "/s", "/c", p.command] : ["-lc", p.command], { cwd: currentCwd, windowsHide: true }); let output = ""; child.stdout.on("data", (d) => { output += d; sendToRenderer("terminal:data", { data: d.toString() }); }); child.stderr.on("data", (d) => { output += d; sendToRenderer("terminal:data", { data: d.toString(), error: true }); }); child.on("close", (code) => resolve({ output, code })); });
+  }
+  throw new Error(`未知 workspace 操作: ${type}`);
+});
 
 function startPiRpc(cwd) {
   cwd = cwd || currentCwd;
