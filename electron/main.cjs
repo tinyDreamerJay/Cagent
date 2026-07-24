@@ -4,6 +4,12 @@ const os = require("os");
 const path = require("path");
 const { pathToFileURL } = require("url");
 const { spawn, execFile } = require("child_process");
+const {
+  addResourcePath,
+  assertSessionFile,
+  assertWhitelistedResource,
+  copyFileVerified,
+} = require("./resource-utils.cjs");
 
 // Suppress EPIPE errors when running with piped stdio
 process.stdout.on("error", () => {});
@@ -30,6 +36,8 @@ const runtimeApiKeys = new Map();
 let restartingPi = false;
 const pendingPiRequests = new Map();
 let pendingGuiMessages = { steering: [], followUp: [] };
+let activeSessionFile = null;
+const resourceOpenWhitelist = new Set();
 
 function rejectPendingPiRequests(error) {
   for (const pending of pendingPiRequests.values()) {
@@ -118,6 +126,31 @@ function messageContentText(message) {
     })
     .filter(Boolean)
     .join("\n");
+}
+
+async function scanPiResources() {
+  const pi = await import(pathToFileURL(path.join(__dirname, "..", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js")).href);
+  const agentDir = path.join(os.homedir(), ".pi", "agent");
+  const loader = new pi.DefaultResourceLoader({ cwd: currentCwd, agentDir, noExtensions: true });
+  await loader.reload();
+  const resources = [];
+  resourceOpenWhitelist.clear();
+  const add = (kind, item, name, filePath, status = "available") => {
+    let realPath = filePath;
+    try {
+      realPath = addResourcePath(resourceOpenWhitelist, filePath);
+    } catch {
+      status = "error";
+    }
+    resources.push({ kind, name, path: realPath, source: item?.sourceInfo?.scope || item?.sourceInfo?.source || "unknown", status, description: item?.description });
+  };
+  for (const item of loader.getSkills().skills) add("skill", item, item.name, item.filePath);
+  for (const item of loader.getPrompts().prompts) add("prompt", item, item.name, item.filePath);
+  const settings = pi.SettingsManager.create(currentCwd, agentDir);
+  const packages = new pi.DefaultPackageManager({ cwd: currentCwd, agentDir, settingsManager: settings });
+  for (const pkg of packages.listConfiguredPackages()) if (pkg.installedPath) add("extension", { sourceInfo: { scope: pkg.scope, source: pkg.source } }, path.basename(pkg.installedPath), pkg.installedPath, pkg.filtered ? "disabled" : "configured");
+  for (const diagnostic of [...loader.getSkills().diagnostics, ...loader.getPrompts().diagnostics]) resources.push({ kind: "resource", name: diagnostic.path || "resource", path: diagnostic.path, source: "unknown", status: "error", error: diagnostic.error || diagnostic.message });
+  return resources;
 }
 
 function toRendererMessages(messages) {
@@ -362,6 +395,7 @@ async function initializeRendererSession() {
   const state = await sendPiCommand({ type: "get_state" });
   const result = await sendPiCommand({ type: "get_available_models" });
   availableModels = result?.models || [];
+  activeSessionFile = state?.sessionFile || null;
   sendToRenderer("session:ready", { sessionId: state?.sessionId, sessionFile: state?.sessionFile, cwd: currentCwd });
   const providers = [...new Set(availableModels.map((model) => model.provider))];
   sendToRenderer("auth:providers", providers);
@@ -487,6 +521,14 @@ ipcMain.on("pi:command", async (_event, message) => {
       sendToRenderer("session:stats", stats || {});
       return;
     }
+    if (message?.type === "session:resources") {
+      try {
+        const result = await sendPiCommand({ type: "get_commands" });
+        const commands = (result?.commands || []).map((command) => ({ kind: "command", name: command.name, source: command.source || "pi", path: "", status: "available", description: command.description }));
+        sendToRenderer("session:resources", { resources: [...await scanPiResources(), ...commands], capabilities: { refresh: true, open: true } });
+      } catch (error) { sendToRenderer("session:resources", { resources: [], error: error.message, capabilities: { refresh: true, open: true } }); }
+      return;
+    }
     if (message?.type === "session:commands") {
       const result = await sendPiCommand({ type: "get_commands" });
       sendToRenderer("session:commands", result?.commands || []);
@@ -531,6 +573,19 @@ ipcMain.on("pi:command", async (_event, message) => {
     if (message?.type === "session:export-html") {
       const result = await sendPiCommand({ type: "export_html", outputPath: payload.outputPath || undefined });
       sendToRenderer("session:exported", result || {});
+      return;
+    }
+    if (message?.type === "session:export-jsonl") {
+      const sourcePath = assertSessionFile(activeSessionFile, path.join(os.homedir(), ".pi", "agent", "sessions"));
+      const picked = await dialog.showSaveDialog(mainWindow, { title: "Export pi session JSONL", defaultPath: path.basename(sourcePath), filters: [{ name: "JSONL", extensions: ["jsonl"] }] });
+      if (picked.canceled || !picked.filePath) return;
+      const outputPath = copyFileVerified(sourcePath, picked.filePath);
+      sendToRenderer("session:exported", { path: outputPath, format: "jsonl" });
+      return;
+    }
+    if (message?.type === "resource:open") {
+      const target = assertWhitelistedResource(resourceOpenWhitelist, String(payload?.path || ""));
+      await shell.openPath(target);
       return;
     }
     if (message?.type === "session:bash") {

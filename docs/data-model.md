@@ -97,3 +97,6 @@ Pi tool permission request 由 RPC extension 产生：`{ id, method: "select", t
 
 Workspace Git 状态中的 `worktrees` 是 `{ path, head, branch }[]` 结构化列表。终端协议包含 `terminal-start`、`terminal-write`、`terminal-resize`、`terminal-kill`；当前 cmd.exe 后端返回 resize unsupported，不向 GUI 暴露 resize 控件。
 
+## 资源中心增量模型
+
+资源清单来自 pi `DefaultResourceLoader`、运行期 `get_commands` 和 diagnostics；GUI 只读展示真实 scope、路径、状态与错误。导出 JSONL 仅复制当前 pi `sessionFile`，不支持伪造导入。

@@ -164,3 +164,6 @@ Extension 的 RPC UI 事件中，`setWidget` 映射为 editor 上下方的文本
 - **旧版 server 不新增主链路能力**：`electron/server.cjs` 与 `server/src/` 仅用于兼容回退
 - **error payload 必须是 `{ message: string }`**：前端错误处理依赖此格式
 - **API Key 通过主进程运行时覆盖注入 pi**：不要把密钥发送到 renderer 之外的第三方服务，也不要直接操作 credential store
+## 资源中心增量约定
+
+Electron 主进程使用 `DefaultResourceLoader({ noExtensions: true })` 读取 skills/prompts，避免再次执行 extension；extensions 仅以配置路径做静态 inventory，命令和错误来自已运行 RPC。

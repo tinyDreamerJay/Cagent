@@ -111,3 +111,6 @@ pi SDK 自带四个内置工具：
 - 所有 error payload 必须是 `{ message: string }` 格式
 - 前端兼容字符串 payload（向下兼容旧版）
 - `sending` 和 `streaming` 状态在出错时必须重置为 `false`
+## 资源中心与导出增量规则
+
+资源只读；Refresh inventory 重新扫描，Open location 受 realpath 白名单限制。HTML 使用 pi `export_html`，JSONL 使用当前 session 原文件并经保存对话框复制；pi 不支持导入时不提供 Import。
