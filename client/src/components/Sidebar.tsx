@@ -1,211 +1,44 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 
 interface SidebarProps {
-  sessions: { id: string; name: string; date: string }[];
-  activeSession: string | null;
-  onSessionSelect: (id: string) => void;
-  onNewSession: () => void;
-  onSessionDelete?: (id: string) => void;
-  apiKey: string;
-  provider: string;
-  availableProviders: string[];
-  modelsByProvider: Record<string, string[]>;
-  selectedModel: string;
-  onModelSelect: (model: string) => void;
+  sessions: { id: string; name: string; date: string }[]; activeSession: string | null;
+  onSessionSelect: (id: string) => void; onNewSession: () => void; onSessionDelete?: (id: string) => void; apiKey: string;
+  provider: string; availableProviders: string[]; modelsByProvider: Record<string, string[]>;
+  selectedModel: string; onModelSelect: (model: string) => void; onProviderSelect: (provider: string) => void;
   onApiKeySet: (key: string, provider: string, mode: "stored" | "session") => void;
-  cwd: string;
-  onCwdChange: (cwd: string) => void;
-  mobileOpen: boolean;
-  onMobileClose: () => void;
+  cwd: string; onCwdChange: (cwd: string) => void; mobileOpen: boolean; onMobileClose: () => void;
   providerStates?: { provider: string; configured: boolean; available: boolean; source: string; models: string[]; capabilities: { apiKey: boolean; oauth: boolean }; error?: string }[];
-  mcpServers?: { status: string; source: string; error?: string }[];
-  onOAuth?: (provider: string) => void;
-  onClear?: (provider: string) => void;
+  mcpServers?: { status: string; source: string; error?: string }[]; onOAuth?: (provider: string) => void; onClear?: (provider: string) => void;
 }
 
-const CagentLogo = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-    <rect width="24" height="24" rx="4" fill="#163635"/>
-    <rect x="0.5" y="0.5" width="23" height="23" rx="3.5" stroke="#3a5b56"/>
-    <path d="M16.6 8.1a6.2 6.2 0 1 0 0 7.8" stroke="#8ed1be" strokeWidth="2.3" strokeLinecap="square"/>
-  </svg>
-);
+export function Sidebar(props: SidebarProps) {
+  const { sessions, activeSession, onSessionSelect, onNewSession, onSessionDelete, apiKey, provider, availableProviders, modelsByProvider, selectedModel, onModelSelect, onProviderSelect, onApiKeySet, cwd, onCwdChange, mobileOpen, onMobileClose, providerStates = [], mcpServers = [], onOAuth, onClear } = props;
+  const [view, setView] = useState<"sessions" | "settings">("sessions");
+  const [keyInput, setKeyInput] = useState(""); const [keyMode, setKeyMode] = useState<"stored" | "session">("stored");
+  const [selectedProvider, setSelectedProvider] = useState(provider || availableProviders[0] || "deepseek");
+  const [cwdInput, setCwdInput] = useState(cwd); const [confirmClear, setConfirmClear] = useState(false); const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
+  useEffect(() => { if (provider && availableProviders.includes(provider)) setSelectedProvider(provider); }, [provider, availableProviders]);
+  useEffect(() => setCwdInput(cwd), [cwd]);
+  const state = providerStates.find((item) => item.provider === selectedProvider);
+  const commitDirectory = () => { const next = cwdInput.trim(); if (next && next !== cwd) onCwdChange(next); else setCwdInput(cwd); };
+  const selectProvider = (next: string) => { setSelectedProvider(next); onProviderSelect(next); const models = modelsByProvider[next] || []; if (models.length) onModelSelect(models[0]); };
 
-export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession, onSessionDelete, apiKey, provider, modelsByProvider, selectedModel, onModelSelect, onApiKeySet, availableProviders, cwd, onCwdChange, mobileOpen, onMobileClose, providerStates = [], mcpServers = [], onOAuth, onClear }: SidebarProps) {
-  const [keyInput, setKeyInput] = useState("");
-  const [keyMode, setKeyMode] = useState<"stored" | "session">("stored");
-  const [showSettings, setShowSettings] = useState(false);
-  const [selProvider, setSelProvider] = useState(provider || (availableProviders?.[0] || "deepseek"));
-  const [cwdInput, setCwdInput] = useState(cwd);
-
-  // 外部 provider 变化时同步 selProvider
-  useEffect(() => {
-    if (provider && provider !== selProvider && availableProviders.includes(provider)) {
-      setSelProvider(provider);
-    }
-  }, [provider, selProvider, availableProviders]);
-
-  useEffect(() => {
-    setCwdInput(cwd);
-  }, [cwd]);
-
-  const commitWorkingDirectory = () => {
-    const nextCwd = cwdInput.trim();
-    if (!nextCwd) {
-      setCwdInput(cwd);
-      return;
-    }
-    if (nextCwd !== cwd) onCwdChange(nextCwd);
-  };
-
-  return (
-    <aside id="sessions-drawer" className={`sidebar ${mobileOpen ? "open" : ""}`} aria-label="Sessions">
-      <div className="sidebar-header">
-        <button className="sidebar-close" type="button" aria-label="Close sessions" onClick={onMobileClose}>x</button>
-        <div className="sidebar-logo">
-          <div className="sidebar-logo-icon">
-            <CagentLogo />
-          </div>
-          C<span>agent</span>
-        </div>
-        <div className="sidebar-subtitle">Coding Agent</div>
-      </div>
-
-      {modelsByProvider[selProvider]?.length > 0 && (
-        <div className="sidebar-quick-model">
-          <div className="sidebar-quick-model-label">Model</div>
-          <select
-            value={selectedModel}
-            onChange={(e) => onModelSelect(e.target.value)}
-          >
-            {modelsByProvider[selProvider].map(m => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      <div className="sidebar-section">Actions</div>
-      {sessions.length === 0 ? (
-        <div className="sidebar-item" style={{ cursor: "default", opacity: 0.4 }}>
-          No sessions
-        </div>
-      ) : (
-        sessions.map((s) => (
-          <button
-            key={s.id}
-            className={`sidebar-item sidebar-session ${s.id === activeSession ? "active" : ""}`}
-            onClick={() => { onSessionSelect(s.id); onMobileClose(); }}
-            type="button"
-          >
-            <span className="dot" />
-            <div className="sidebar-session-info">
-              <span className="sidebar-session-title">{s.name}</span>
-              <span className="sidebar-session-date">{s.date}</span>
-            </div>
-            {onSessionDelete && (
-              <button
-                className="sidebar-session-delete"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSessionDelete(s.id);
-                }}
-                title="Delete session"
-              >
-                x
-              </button>
-            )}
-          </button>
-        ))
-      )}
-      <button className="sidebar-item" onClick={() => { onNewSession(); onMobileClose(); }}>
-        <span className="dot" style={{ background: "var(--success)" }} />
-        New session
-      </button>
-      <button className="sidebar-item" onClick={() => setShowSettings(!showSettings)}>
-        <span className="dot" style={{ background: apiKey ? "var(--success)" : "var(--warning)" }} />
-        Settings
-      </button>
-
-      {showSettings && (
-        <div className="sidebar-settings">
-          <select
-            value={selProvider}
-            onChange={(e) => {
-              const newProv = e.target.value;
-              setSelProvider(newProv);
-              // 切换 provider 时，自动选中该 provider 下的第一个模型
-              const provModels = modelsByProvider[newProv] || [];
-              if (provModels.length > 0) {
-                onModelSelect(provModels[0]);
-              }
-            }}
-          >
-            {(availableProviders || ["deepseek"]).map(p => (
-              <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}{modelsByProvider[p]?.length ? ` (${modelsByProvider[p].length})` : ''}</option>
-            ))}
-          </select>
-          {providerStates.find((item) => item.provider === selProvider)?.capabilities?.apiKey !== false && <input
-            type="password"
-            value={keyInput}
-            onChange={(e) => setKeyInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                onApiKeySet(keyInput.trim(), selProvider, keyMode);
-                setKeyInput("");
-                setShowSettings(false);
-              }
-            }}
-            placeholder={`${selProvider === "anthropic" ? "Anthropic" : selProvider === "deepseek" ? "DeepSeek" : "OpenAI"} API Key...`}
-          />}
-          <div className="settings-hint">
-            Enter to save &middot; Secret stays in pi runtime
-          </div>
-          <select value={keyMode} onChange={(event) => setKeyMode(event.target.value as "stored" | "session")}><option value="stored">Save to pi</option><option value="session">Session only</option></select>
-          {providerStates.find((item) => item.provider === selProvider)?.capabilities?.oauth && <button type="button" className="settings-action" onClick={() => onOAuth?.(selProvider)}>Sign in with OAuth</button>}
-          {providerStates.find((item) => item.provider === selProvider)?.configured && <button type="button" className="settings-action" onClick={() => window.confirm("Remove this credential from pi?") && onClear?.(selProvider)}>Remove credential</button>}
-          <div className="settings-label">
-            Working directory
-          </div>
-          <div className="settings-row">
-            <input
-              type="text"
-              value={cwdInput}
-              onChange={(e) => setCwdInput(e.target.value)}
-              onBlur={commitWorkingDirectory}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.currentTarget.blur();
-                }
-              }}
-              placeholder="C:\\project"
-            />
-          </div>
-          {modelsByProvider[selProvider]?.length > 0 && (
-            <>
-              <div className="settings-label">
-                Model
-              </div>
-              <select
-                value={selectedModel}
-                onChange={(e) => onModelSelect(e.target.value)}
-              >
-                {modelsByProvider[selProvider].map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </>
-          )}
-        </div>
-      )}
-
-      <div className="sidebar-section">MCP</div>
-      <div className="settings-hint mcp-summary">{mcpServers[0]?.error || "Pi 0.81.1 has no built-in MCP"}</div>
-
-      <div className="sidebar-section">Sessions</div>
-
-      <div className="sidebar-spacer" />
-      <div className="sidebar-footer">v1.0.0 &middot; Cagent</div>
-    </aside>
-  );
+  return <aside id="sessions-drawer" className={`sidebar ${mobileOpen ? "open" : ""}`} aria-label="Project navigation">
+    <div className="activity-rail" aria-label="Primary navigation"><button className="rail-brand" type="button" title="Cagent">C</button><button className={view === "sessions" ? "active" : ""} type="button" onClick={() => setView("sessions")} title="Sessions">S</button><button className={view === "settings" ? "active" : ""} type="button" onClick={() => setView("settings")} title="Settings">G</button><span /><button type="button" onClick={onNewSession} title="New session">+</button></div>
+    <div className="sidebar-content">
+      <header className="sidebar-header"><button className="sidebar-close" type="button" onClick={onMobileClose} aria-label="Close navigation">x</button><div className="sidebar-logo">Cagent</div><div className="sidebar-subtitle">{view === "sessions" ? "Project sessions" : "Runtime settings"}</div></header>
+      {view === "sessions" ? <><div className="sidebar-actions"><button type="button" onClick={onNewSession}>+ New session</button></div><div className="session-list">{sessions.length ? sessions.map((s) => <div key={s.id} className={`session-row ${s.id === activeSession ? "active" : ""}`}><button className="sidebar-item sidebar-session" onClick={() => { onSessionSelect(s.id); onMobileClose(); }} type="button"><span className="dot" /><span className="sidebar-session-info"><span className="sidebar-session-title">{s.name}</span><span className="sidebar-session-date">{s.date}</span></span></button>{onSessionDelete && <button className="session-delete" type="button" onClick={() => setPendingDelete({ id: s.id, name: s.name })} title="Delete session">x</button>}</div>) : <div className="sidebar-empty">No saved sessions</div>}</div></> : <div className="settings-stack">
+        <label>Provider<select value={selectedProvider} onChange={(event) => selectProvider(event.target.value)}>{availableProviders.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        {modelsByProvider[selectedProvider]?.length > 0 && <label>Model<select value={selectedModel} onChange={(event) => onModelSelect(event.target.value)}>{modelsByProvider[selectedProvider].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>}
+        {state?.capabilities.apiKey !== false && <label>API key<input type="password" value={keyInput} onChange={(event) => setKeyInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && keyInput.trim()) { onApiKeySet(keyInput.trim(), selectedProvider, keyMode); setKeyInput(""); } }} placeholder="Enter API key" /></label>}
+        <label>Key scope<select value={keyMode} onChange={(event) => setKeyMode(event.target.value as "stored" | "session")}><option value="stored">Save to pi</option><option value="session">Session only</option></select></label>
+        <div className="settings-actions">{state?.capabilities.oauth && <button type="button" onClick={() => onOAuth?.(selectedProvider)}>OAuth sign in</button>}{state?.configured && <button type="button" className="danger-action" onClick={() => setConfirmClear(true)}>Remove credential</button>}</div>
+        <label>Project directory<input value={cwdInput} onChange={(event) => setCwdInput(event.target.value)} onBlur={commitDirectory} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} placeholder="C:\\project" /></label>
+        <div className="mcp-note"><strong>MCP</strong><span>{mcpServers[0]?.error || mcpServers[0]?.source || "No runtime MCP inventory"}</span></div>
+      </div>}
+      <footer className="sidebar-footer"><span className={apiKey ? "status-ready" : "status-idle"} />{apiKey ? "Credential ready" : "Credential required"}</footer>
+    </div>
+    {confirmClear && <div className="modal-scrim" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-label="Remove credential"><h2>Remove credential?</h2><p>This clears the credential for {selectedProvider} from the pi runtime.</p><div><button type="button" onClick={() => setConfirmClear(false)}>Cancel</button><button type="button" className="danger-action" onClick={() => { onClear?.(selectedProvider); setConfirmClear(false); }}>Remove</button></div></section></div>}
+    {pendingDelete && <div className="modal-scrim" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-label="Delete session"><h2>Delete session?</h2><p>{pendingDelete.name} will be removed.</p><div><button type="button" onClick={() => setPendingDelete(null)}>Cancel</button><button type="button" className="danger-action" onClick={() => { onSessionDelete?.(pendingDelete.id); setPendingDelete(null); }}>Delete</button></div></section></div>}
+  </aside>;
 }

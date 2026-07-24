@@ -1,79 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
-
-type Entry = { name: string; directory: boolean };
-type Approval = { id: string; type: string; summary: string };
+type Entry = { name: string; directory: boolean }; type Approval = { id: string; type: string; summary: string };
 type GitState = { branch: string; status: string; diff: string; worktrees: { path: string; head: string; branch: string }[] };
-
-export function WorkspacePanel() {
-  const api = window.cagent?.workspace;
-  const [cwd, setCwd] = useState("");
-  const [relativePath, setRelativePath] = useState(".");
-  const [entries, setEntries] = useState<Entry[]>([]);
-  const [preview, setPreview] = useState("");
-  const [git, setGit] = useState<GitState | null>(null);
-  const [command, setCommand] = useState("");
-  const [terminalOutput, setTerminalOutput] = useState("");
-  const [terminalRunning, setTerminalRunning] = useState(false);
-  const [approval, setApproval] = useState<Approval | null>(null);
-  const [error, setError] = useState("");
-  const [commitMessage, setCommitMessage] = useState("");
-  const [branchName, setBranchName] = useState("");
-  const [worktreeName, setWorktreeName] = useState("");
-  const [worktreeTarget, setWorktreeTarget] = useState("");
-  const [startRef, setStartRef] = useState("HEAD");
-
-  const loadFiles = useCallback(async (nextPath = ".") => {
-    try {
-      setError("");
-      const result = await api?.request("list", { path: nextPath });
-      if (result) { setRelativePath(result.path); setEntries(result.entries); }
-    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
-  }, [api]);
-
-  useEffect(() => {
-    api?.request("root").then((result) => { setCwd(result.cwd); loadFiles(); }).catch((err) => setError(String(err)));
-    return api?.onEvent((message) => {
-      if (message.type === "workspace:approval") setApproval(message.payload);
-      if (message.type === "terminal:data") setTerminalOutput((value) => value + message.payload.data);
-      if (message.type === "terminal:status") setTerminalRunning(message.payload.running);
-      if (message.type === "cwd:updated") { setCwd(message.payload.cwd); loadFiles(); }
-    });
-  }, [api, loadFiles]);
-
-  const openEntry = async (entry: Entry) => {
-    const nextPath = relativePath === "." ? entry.name : `${relativePath}/${entry.name}`;
-    if (entry.directory) return loadFiles(nextPath);
-    try { const result = await api?.request("read", { path: nextPath }); setPreview(result?.content || ""); } catch (err) { setError(String(err)); }
-  };
+export type WorkspaceView = "files" | "git" | "terminal";
+export function WorkspacePanel({ view }: { view: WorkspaceView }) {
+  const api = window.cagent?.workspace; const [cwd, setCwd] = useState(""); const [path, setPath] = useState("."); const [entries, setEntries] = useState<Entry[]>([]); const [preview, setPreview] = useState("");
+  const [git, setGit] = useState<GitState | null>(null); const [command, setCommand] = useState(""); const [terminalOutput, setTerminalOutput] = useState(""); const [terminalRunning, setTerminalRunning] = useState(false); const [approval, setApproval] = useState<Approval | null>(null); const [error, setError] = useState("");
+  const [commitMessage, setCommitMessage] = useState(""); const [branchName, setBranchName] = useState(""); const [worktreeName, setWorktreeName] = useState(""); const [worktreeTarget, setWorktreeTarget] = useState(""); const [startRef, setStartRef] = useState("HEAD");
   const request = async (type: string, payload?: unknown) => { try { setError(""); const result = await api?.request(type, payload); if (result?.id) setApproval(result); return result; } catch (err) { setError(err instanceof Error ? err.message : String(err)); return null; } };
-  const approve = async () => { if (!approval) return; await request("approve", { id: approval.id }); setApproval(null); };
-  const deny = async () => { if (approval) await request("deny", { id: approval.id }); setApproval(null); };
-  const parent = relativePath.split(/[\\/]/).slice(0, -1).join("/") || ".";
-
-  return (
-    <aside className="workspace-panel" aria-label="Project workspace">
-      <div className="workspace-title">WORKSPACE<span title={cwd}>{cwd || "Loading..."}</span></div>
-      <div className="workspace-actions">
-        <button type="button" onClick={() => request("choose-directory")}>Choose project</button>
-        <button type="button" onClick={() => loadFiles()}>Refresh files</button>
-        <button type="button" onClick={async () => setGit(await api?.request("git-status"))}>Git</button>
-      </div>
-      <div className="workspace-status" aria-live="polite">{terminalRunning ? "Terminal running" : "Terminal idle"}{git?.branch ? ` · ${git.branch}` : ""}</div>
-      {error && <div className="workspace-error" role="alert">{error}</div>}
-      <div className="workspace-tree" aria-label="Project files">
-        {relativePath !== "." && <button type="button" onClick={() => loadFiles(parent)}>..</button>}
-        {entries.length === 0 && !error && <div className="workspace-empty">No files</div>}
-        {entries.map((entry) => <button type="button" key={entry.name} onClick={() => openEntry(entry)}>{entry.directory ? "▸ " : "  "}{entry.name}</button>)}
-      </div>
-      {git && <><pre className="workspace-output" aria-label="Git status">{git.branch}{"\n"}{git.status || "clean"}{"\n"}{git.diff}</pre><div className="workspace-actions"><button type="button" onClick={() => request("git-stage", { paths: git.status.split("\n").filter(Boolean).map((line) => line.slice(3).trim()) })}>Stage changed</button><input aria-label="Commit message" value={commitMessage} onChange={(e) => setCommitMessage(e.target.value)} placeholder="Commit message" /><button type="button" disabled={!commitMessage.trim()} onClick={() => request("git-commit", { message: commitMessage })}>Commit</button><input aria-label="Branch name" value={branchName} onChange={(e) => setBranchName(e.target.value)} placeholder="Branch name" /><button type="button" disabled={!branchName.trim()} onClick={() => request("git-branch", { name: branchName })}>New branch</button><input aria-label="Worktree name" value={worktreeName} onChange={(e) => setWorktreeName(e.target.value)} placeholder="Worktree name" /><input aria-label="Worktree target" value={worktreeTarget} onChange={(e) => setWorktreeTarget(e.target.value)} placeholder="Target directory" /><input aria-label="Start ref" value={startRef} onChange={(e) => setStartRef(e.target.value)} placeholder="Start ref" /><button type="button" disabled={!worktreeName || !worktreeTarget} onClick={() => request("worktree-add", { name: worktreeName, target: worktreeTarget, startRef })}>New worktree</button></div><div className="workspace-worktrees" aria-label="Worktrees">{git.worktrees.map((item) => <div key={item.path}>{item.branch} · {item.path}</div>)}</div></>}
-      {preview && <pre className="workspace-preview" aria-label="File preview">{preview}</pre>}
-      <button type="button" onClick={async () => { const result = await request("choose-worktree-target"); if (result?.target) setWorktreeTarget(result.target); }}>Choose worktree target</button>
-      <div className="workspace-terminal">
-        <div className="terminal-actions"><button type="button" onClick={() => request("terminal-start")}>Start</button><button type="button" onClick={() => request("terminal-kill")}>Kill</button></div>
-        <input aria-label="Terminal command" value={command} onChange={(event) => setCommand(event.target.value)} placeholder="Run command..." onKeyDown={(event) => { if (event.key === "Enter" && command.trim()) { request("terminal", { command }); setCommand(""); } }} />
-        <pre aria-label="Terminal output">{terminalOutput || "Terminal ready"}</pre>
-      </div>
-      {approval && <div className="approval-dialog" role="dialog" aria-label="Operation approval"><strong>需要审批</strong><span>{approval.summary}</span><button type="button" onClick={approve}>Approve</button><button type="button" onClick={deny}>Deny</button></div>}
-    </aside>
-  );
+  const loadFiles = useCallback(async (next = ".") => { const result = await request("list", { path: next }); if (result) { setPath(result.path); setEntries(result.entries); } }, []);
+  useEffect(() => { api?.request("root").then((result) => { setCwd(result.cwd); loadFiles(); }).catch((err) => setError(String(err))); return api?.onEvent((message) => { if (message.type === "workspace:approval") setApproval(message.payload); if (message.type === "terminal:data") setTerminalOutput((value) => value + message.payload.data); if (message.type === "terminal:status") setTerminalRunning(message.payload.running); if (message.type === "cwd:updated") { setCwd(message.payload.cwd); loadFiles(); } }); }, [api, loadFiles]);
+  useEffect(() => { if (view === "git") request("git-status").then((value) => value && setGit(value)); }, [view]);
+  const open = async (entry: Entry) => { const next = path === "." ? entry.name : `${path}/${entry.name}`; if (entry.directory) return loadFiles(next); const result = await request("read", { path: next }); setPreview(result?.content || ""); };
+  const parent = path.split(/[\\/]/).slice(0, -1).join("/") || ".";
+  return <section className="workspace-panel" aria-label="Workspace inspector"><div className="inspector-path" title={cwd}>{cwd || "Project not selected"}</div>{error && <div className="workspace-error" role="alert">{error}</div>}
+    {view === "files" && <><div className="inspector-actions"><button type="button" onClick={() => request("choose-directory")}>Choose project</button><button type="button" onClick={() => loadFiles()}>Refresh</button></div><div className="workspace-tree">{path !== "." && <button type="button" onClick={() => loadFiles(parent)}>..</button>}{entries.length === 0 && !error && <div className="workspace-empty">No files</div>}{entries.map((entry) => <button type="button" key={entry.name} onClick={() => open(entry)}><span>{entry.directory ? "DIR" : "FILE"}</span>{entry.name}</button>)}</div>{preview && <pre className="workspace-preview">{preview}</pre>}</>}
+    {view === "git" && <><div className="inspector-actions"><button type="button" onClick={async () => setGit(await request("git-status"))}>Refresh</button>{git && <button type="button" onClick={() => request("git-stage", { paths: git.status.split("\n").filter(Boolean).map((line) => line.slice(3).trim()) })}>Stage changed</button>}</div>{git ? <><pre className="workspace-output">{git.branch}{"\n"}{git.status || "clean"}{"\n"}{git.diff}</pre><div className="inspector-form"><input value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder="Commit message" /><button type="button" disabled={!commitMessage.trim()} onClick={() => request("git-commit", { message: commitMessage })}>Commit</button><input value={branchName} onChange={(event) => setBranchName(event.target.value)} placeholder="Branch name" /><button type="button" disabled={!branchName.trim()} onClick={() => request("git-branch", { name: branchName })}>Create branch</button><input value={worktreeName} onChange={(event) => setWorktreeName(event.target.value)} placeholder="Worktree name" /><input value={worktreeTarget} onChange={(event) => setWorktreeTarget(event.target.value)} placeholder="Target directory" /><input value={startRef} onChange={(event) => setStartRef(event.target.value)} placeholder="Start ref" /><button type="button" onClick={async () => { const result = await request("choose-worktree-target"); if (result?.target) setWorktreeTarget(result.target); }}>Choose target</button><button type="button" disabled={!worktreeName || !worktreeTarget} onClick={() => request("worktree-add", { name: worktreeName, target: worktreeTarget, startRef })}>Add worktree</button></div><div className="worktree-list">{git.worktrees.map((item) => <div key={item.path}><strong>{item.branch}</strong><span>{item.path}</span></div>)}</div></> : <div className="workspace-empty">Loading Git status...</div>}</>}
+    {view === "terminal" && <><div className="terminal-status"><span className={terminalRunning ? "status-ready" : "status-idle"} />{terminalRunning ? "Terminal running" : "Terminal idle"}</div><div className="inspector-actions"><button type="button" onClick={() => request("terminal-start")}>Start</button><button type="button" onClick={() => request("terminal-kill")}>Kill</button></div><div className="terminal-command"><input value={command} onChange={(event) => setCommand(event.target.value)} placeholder="Run command..." onKeyDown={(event) => { if (event.key === "Enter" && command.trim()) { request("terminal", { command }); setCommand(""); } }} /><button type="button" onClick={() => { if (command.trim()) { request("terminal", { command }); setCommand(""); } }}>Run</button></div><pre className="terminal-output">{terminalOutput || "Terminal ready"}</pre></>}
+    {approval && <div className="modal-scrim"><section className="confirm-modal" role="dialog" aria-modal="true"><h2>Approval required</h2><p>{approval.summary}</p><div><button type="button" onClick={async () => { await request("deny", { id: approval.id }); setApproval(null); }}>Deny</button><button type="button" onClick={async () => { await request("approve", { id: approval.id }); setApproval(null); }}>Approve</button></div></section></div>}
+  </section>;
 }

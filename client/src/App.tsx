@@ -5,7 +5,7 @@ import { MessageContent } from "./components/MessageContent";
 import { type Message, type ToolCall } from "./hooks/useConversations";
 import { RuntimeBar, type RuntimeState } from "./components/RuntimeBar";
 import { AgentConsole } from "./components/AgentConsole";
-import { WorkspacePanel } from "./components/WorkspacePanel";
+import { WorkspacePanel, type WorkspaceView } from "./components/WorkspacePanel";
 import { ResourceCenter, type PiResource } from "./components/ResourceCenter";
 import { UsagePanel } from "./components/UsagePanel";
 
@@ -42,6 +42,8 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [inspectorTab, setInspectorTab] = useState<"files" | "git" | "terminal" | "resources" | "usage">("files");
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -598,7 +600,6 @@ function App() {
   return (
     <ErrorBoundary>
     <div className="app-container">
-      <WorkspacePanel />
       {extensionRequest && (
         <div className="extension-overlay" role="dialog" aria-modal="true" aria-label={extensionRequest.title || "Extension request"}>
           <div className="extension-dialog">
@@ -632,6 +633,7 @@ function App() {
         activeSession={activeSessionPath}
         onSessionSelect={handleSessionSelect}
         onNewSession={handleNewSession}
+        onProviderSelect={(nextProvider) => { setProvider(nextProvider); localStorage.setItem("cagent_provider", nextProvider); setSelectedModel((modelsByProvider[nextProvider] || [])[0] || ""); }}
         apiKey={credentialReady ? "ready" : ""}
         provider={provider}
         availableProviders={availableProviders}
@@ -663,23 +665,19 @@ function App() {
           >
             Sessions
           </button>
-          <span className="chat-header-title">
-            {!connected ? "Connecting..." :
-             !initDone ? "Initializing..." :
-             credentialReady ? "Ready" : "Set API Key"}
-          </span>
+          <span className="chat-header-title">{runtimeState?.sessionName || "Untitled session"}</span>
           {statusMsg && (
             <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8 }}>{statusMsg}</span>
           )}
-          <span className="chat-header-model">
-            {selectedModel || "Cagent"}
-          </span>
+          <button type="button" className="inspector-toggle" onClick={() => setInspectorOpen((value) => !value)} aria-expanded={inspectorOpen}>{inspectorOpen ? "Hide inspector" : "Inspector"}</button>
         </header>
 
         <RuntimeBar
           state={runtimeState}
           thinkingLevels={thinkingLevels}
           disabled={!initDone || sending}
+          model={selectedModel}
+          connected={connected && initDone && credentialReady}
           onThinkingChange={(level) => send("session:set-thinking", { level })}
           onAutoCompactionChange={(enabled) => send("session:set-auto-compaction", { enabled })}
           onCompact={() => send("session:compact")}
@@ -697,10 +695,6 @@ function App() {
             tree={sessionTree}
             forkMessages={forkMessages}
           />
-          <div className="workspace-panels">
-            <UsagePanel stats={stats} onRefresh={() => send("session:stats")} />
-            <ResourceCenter resources={resources} loading={resourcesLoading} error={resourcesError} onReload={() => { setResourcesLoading(true); send("session:resources"); }} onOpen={(resource) => window.cagent?.pi?.send("resource:open", { path: resource.path })} onExport={(format) => send(format === "html" ? "session:export-html" : "session:export-jsonl", {})} />
-          </div>
         </div>
 
         <div className="messages-container">
@@ -708,7 +702,7 @@ function App() {
             <div className="welcome">
               <div className="welcome-title">Cagent</div>
               <div className="welcome-text">
-                A minimalist coding agent. Use your AI to read, write, edit, and debug your project.
+                {credentialReady ? "Start a session in this project." : "Add a credential in Settings to begin."}
               </div>
               {!credentialReady && initDone && (
                 <div className="welcome-hint">
@@ -856,6 +850,17 @@ function App() {
           {Object.entries(extensionWidgets).filter(([, widget]) => widget.placement === "belowEditor").map(([key, widget]) => <ExtensionWidget key={key} lines={widget.lines} />)}
         </div>
       </main>
+      {inspectorOpen && <aside className="inspector" aria-label="Inspector">
+        <div className="inspector-tabs" role="tablist">
+          {(["files", "git", "terminal", "resources", "usage"] as const).map((tab) => <button key={tab} type="button" role="tab" aria-selected={inspectorTab === tab} className={inspectorTab === tab ? "active" : ""} onClick={() => setInspectorTab(tab)}>{tab}</button>)}
+          <button type="button" className="inspector-close" onClick={() => setInspectorOpen(false)} aria-label="Close inspector">x</button>
+        </div>
+        <div className="inspector-body">
+          {(["files", "git", "terminal"] as string[]).includes(inspectorTab) && <WorkspacePanel view={inspectorTab as WorkspaceView} />}
+          {inspectorTab === "resources" && <ResourceCenter resources={resources} loading={resourcesLoading} error={resourcesError} onReload={() => { setResourcesLoading(true); send("session:resources"); }} onOpen={(resource) => window.cagent?.pi?.send("resource:open", { path: resource.path })} onExport={(format) => send(format === "html" ? "session:export-html" : "session:export-jsonl", {})} />}
+          {inspectorTab === "usage" && <UsagePanel stats={stats} onRefresh={() => send("session:stats")} />}
+        </div>
+      </aside>}
     </div>
     </ErrorBoundary>
   );
