@@ -41,7 +41,7 @@ function App() {
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [cwd, setCwd] = useState(() => localStorage.getItem("cagent_cwd") || "");
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("cagent_apikey") || "");
+  const [credentialReady, setCredentialReady] = useState(false);
   const [provider, setProvider] = useState(() => localStorage.getItem("cagent_provider") || "");
   const [availableProviders, setAvailableProviders] = useState<string[]>(["anthropic", "openai", "deepseek"]);
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>({});
@@ -212,19 +212,15 @@ function App() {
             send("auth:set-key", { provider: pending.provider, apiKey: pending.key });
           }
         } else {
-          const savedKey = localStorage.getItem("cagent_apikey");
           const finalProvider = p.includes(savedProvider || "") ? savedProvider! : p[0];
-          if (savedKey && finalProvider) {
-            setProvider(finalProvider);
-            send("auth:set-key", { provider: finalProvider, apiKey: savedKey });
-          }
+          if (finalProvider) setProvider(finalProvider);
         }
       })
     );
 
     unsubs.push(
       subscribe("auth:key-ready", (p: { provider: string; models?: string[]; source?: string }) => {
-        setApiKey((prev) => prev || "__environment_credential__");
+        setCredentialReady(true);
         setModelsByProvider((prev) => {
           const updated = { ...prev };
           if (p.models && p.models.length > 0) {
@@ -519,9 +515,9 @@ function App() {
 
   const handleApiKeySet = (key: string, prov: string) => {
     if (!key) return;
-    localStorage.setItem("cagent_apikey", key);
+    localStorage.removeItem("cagent_apikey");
     localStorage.setItem("cagent_provider", prov);
-    setApiKey(key);
+    setCredentialReady(false);
     setProvider(prov);
     setModelsByProvider({});
     setSelectedModel("");
@@ -616,7 +612,7 @@ function App() {
         activeSession={activeSessionPath}
         onSessionSelect={handleSessionSelect}
         onNewSession={handleNewSession}
-        apiKey={apiKey}
+        apiKey={credentialReady ? "ready" : ""}
         provider={provider}
         availableProviders={availableProviders}
         modelsByProvider={modelsByProvider}
@@ -649,7 +645,7 @@ function App() {
           <span className="chat-header-title">
             {!connected ? "Connecting..." :
              !initDone ? "Initializing..." :
-             apiKey ? "Ready" : "Set API Key"}
+             credentialReady ? "Ready" : "Set API Key"}
           </span>
           {statusMsg && (
             <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8 }}>{statusMsg}</span>
@@ -689,7 +685,7 @@ function App() {
               <div className="welcome-text">
                 A minimalist coding agent. Use your AI to read, write, edit, and debug your project.
               </div>
-              {!apiKey && initDone && (
+              {!credentialReady && initDone && (
                 <div className="welcome-hint">
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{flexShrink:0}}>
                     <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.5"/>
@@ -803,12 +799,12 @@ function App() {
               onKeyDown={handleKeyDown}
               placeholder={sending ? "Queue a steer or follow-up message..." : "Ask anything..."}
               rows={1}
-              disabled={!apiKey || !initDone}
+              disabled={!credentialReady || !initDone}
             />
             <button
               className={`send-btn ${sending ? "sending" : ""}`}
               onClick={handleSend}
-              disabled={(!input.trim() && pendingImagesRef.current.length === 0 && !sending) || !apiKey || !initDone}
+              disabled={(!input.trim() && pendingImagesRef.current.length === 0 && !sending) || !credentialReady || !initDone}
               title={sending ? "Queue steering message" : "Send"}
             >
               {sending ? (
