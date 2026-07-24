@@ -1,9 +1,9 @@
-const { app, BrowserWindow, shell, ipcMain, screen } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, screen, dialog } = require("electron");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { pathToFileURL } = require("url");
-const { spawn } = require("child_process");
+const { spawn, execFile } = require("child_process");
 
 // Suppress EPIPE errors when running with piped stdio
 process.stdout.on("error", () => {});
@@ -210,6 +210,72 @@ function handlePiLine(line) {
 }
 
 let currentCwd = process.cwd();
+const pendingWorkspaceApprovals = new Map();
+let terminalSession = null;
+
+function resolveWorkspacePath(input = ".") {
+  const root = path.resolve(currentCwd);
+  const target = path.resolve(root, String(input));
+  const rootReal = fs.realpathSync.native(root);
+  let existing = target;
+  while (!fs.existsSync(existing)) { const next = path.dirname(existing); if (next === existing) throw new Error("路径无有效父目录"); existing = next; }
+  const real = fs.realpathSync.native(existing);
+  if (real !== rootReal && !real.startsWith(rootReal + path.sep)) throw new Error("路径超出当前工作目录边界");
+  return target;
+}
+function workspaceApproval(action) {
+  const id = `approval-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  pendingWorkspaceApprovals.set(id, action);
+  sendToRenderer("workspace:approval", { id, type: action.type, summary: action.summary });
+  return { approved: false, requiresApproval: true, id, type: action.type, summary: action.summary };
+}
+function runGit(args) {
+  return new Promise((resolve, reject) => execFile("git", args, { cwd: currentCwd, windowsHide: true, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => error ? reject(new Error(stderr || error.message)) : resolve(stdout)));
+}
+
+ipcMain.handle("workspace:request", async (_event, message) => {
+  const type = message?.type;
+  const p = message?.payload || {};
+  if (type === "root") return { cwd: currentCwd };
+  if (type === "choose-directory") {
+    const result = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory", "createDirectory"] });
+    if (result.canceled || !result.filePaths[0]) return { cancelled: true };
+    const selected = path.resolve(result.filePaths[0]);
+    const oldCwd = currentCwd; pendingWorkspaceApprovals.clear(); terminalSession?.kill(); terminalSession = null; restartingPi = true; stopPiRpc();
+    try { await startPiRpc(selected); await initializeRendererSession(); } catch (error) { stopPiRpc(); await startPiRpc(oldCwd); throw error; } finally { restartingPi = false; }
+    sendToRenderer("cwd:updated", { cwd: selected });
+    return { cwd: selected };
+  }
+  if (type === "list") {
+    const dir = resolveWorkspacePath(p.path || ".");
+    const entries = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => ![".git", "node_modules", "release"].includes(e.name)).sort((a,b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
+    return { path: path.relative(currentCwd, dir) || ".", entries: entries.map((e) => ({ name: e.name, directory: e.isDirectory() })) };
+  }
+  if (type === "read") { const file = resolveWorkspacePath(p.path); const stat = fs.statSync(file); if (stat.size > 1024 * 1024) throw new Error("文件过大，拒绝预览"); return { path: p.path, content: fs.readFileSync(file, "utf8") }; }
+  if (type === "git-status") { const raw = await runGit(["worktree", "list", "--porcelain"]); return { status: await runGit(["status", "--short"]), branch: String(await runGit(["branch", "--show-current"])).trim(), diff: await runGit(["diff", "--stat"]), worktrees: raw.split(/\n\n/).filter(Boolean).map((block) => { const lines = block.split("\n"); return { path: lines.find((x) => x.startsWith("worktree "))?.slice(9), head: lines.find((x) => x.startsWith("HEAD "))?.slice(5), branch: lines.find((x) => x.startsWith("branch "))?.slice(7) || "detached" }; }) }; }
+  if (type === "choose-worktree-target") { const result = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory", "createDirectory"] }); return result.canceled ? { cancelled: true } : { target: result.filePaths[0] }; }
+  if (type === "git-stage") return workspaceApproval({ type, paths: (p.paths || []).map((x) => path.relative(currentCwd, resolveWorkspacePath(x))), summary: `暂存 ${p.paths?.length || 0} 个文件` });
+  if (type === "git-commit") return workspaceApproval({ type, message: String(p.message || "Update").slice(0, 200), summary: `提交: ${String(p.message || "Update").slice(0, 80)}` });
+  if (type === "git-branch") return workspaceApproval({ type, name: String(p.name || "codex/workspace").replace(/[^\w./-]/g, "-").slice(0, 80), summary: `创建分支 ${p.name}` });
+  if (type === "worktree-add") { const name = String(p.name || "codex-worktree").replace(/[^\w.-]/g, "-"); const target = path.resolve(String(p.target || "")); if (!target || fs.existsSync(target) && fs.readdirSync(target).length) throw new Error("worktree target 必须不存在或为空目录"); const branch = `codex/${name}`; if ((await runGit(["branch", "--list", branch])).trim()) throw new Error("分支已存在"); return workspaceApproval({ type, name, target, startRef: String(p.startRef || "HEAD"), branch, summary: `创建 worktree ${target}` }); }
+  if (type === "terminal-start") { if (!terminalSession) { terminalSession = spawn("cmd.exe", ["/d", "/q"], { cwd: currentCwd, windowsHide: true }); terminalSession.stdout.on("data", (d) => sendToRenderer("terminal:data", { data: d.toString() })); terminalSession.stderr.on("data", (d) => sendToRenderer("terminal:data", { data: d.toString(), error: true })); terminalSession.stdin.on("error", (error) => sendToRenderer("terminal:error", { message: error.message })); terminalSession.on("error", (error) => sendToRenderer("terminal:error", { message: error.message })); terminalSession.on("close", (code) => { sendToRenderer("terminal:status", { running: false, code }); terminalSession = null; }); } return { running: true }; }
+  if (type === "terminal-write") { if (!terminalSession?.stdin?.writable) throw new Error("终端会话未启动"); terminalSession.stdin.write(String(p.data || "") + "\r\n"); return { running: true }; }
+  if (type === "terminal-resize") return { supported: false, reason: "cmd.exe 无 PTY resize" };
+  if (type === "terminal-kill") { terminalSession?.kill(); terminalSession = null; return { running: false }; }
+  if (type === "terminal") return workspaceApproval({ type: "terminal-write", data: String(p.command || ""), summary: `执行命令: ${String(p.command || "").slice(0, 100)}` });
+  if (type === "approve") {
+    const action = pendingWorkspaceApprovals.get(String(p.id || ""));
+    if (!action) throw new Error("审批票据无效、已拒绝或已使用");
+    pendingWorkspaceApprovals.delete(String(p.id));
+    if (action.type === "git-stage") return { output: await runGit(["add", "--", ...action.paths]) };
+    if (action.type === "git-commit") return { output: await runGit(["commit", "-m", action.message]) };
+    if (action.type === "git-branch") return { output: await runGit(["switch", "-c", action.name]) };
+    if (action.type === "worktree-add") return { output: await runGit(["worktree", "add", "-b", action.branch, action.target, action.startRef]) };
+    if (action.type === "terminal-write") { if (!terminalSession?.stdin?.writable) throw new Error("终端会话未启动"); terminalSession.stdin.write(action.data + "\r\n"); return { running: true }; }
+  }
+  if (type === "deny") { pendingWorkspaceApprovals.delete(String(p.id || "")); return { denied: true }; }
+  throw new Error(`未知 workspace 操作: ${type}`);
+});
 
 function startPiRpc(cwd) {
   cwd = cwd || currentCwd;
@@ -218,11 +284,12 @@ function startPiRpc(cwd) {
     const rpcEntry = path.join(__dirname, "..", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "rpc-entry.js");
     const ccswitchExt = path.join(__dirname, "ccswitch-provider.cjs");
     const deepseekExt = path.join(__dirname, "deepseek-provider.cjs");
+    const permissionGateExt = path.join(__dirname, "permission-gate.cjs");
     const ccswitch = loadCcswitchCodexConfig();
     if (ccswitch && !runtimeApiKeys.has(ccswitch.providerId)) {
       runtimeApiKeys.set(ccswitch.providerId, ccswitch.apiKey);
     }
-    const args = [rpcEntry, "--extension", deepseekExt];
+    const args = [rpcEntry, "--extension", permissionGateExt, "--extension", deepseekExt];
     if (ccswitch) args.push("--extension", ccswitchExt);
     const childEnv = {
       ...process.env,

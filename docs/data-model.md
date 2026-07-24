@@ -89,3 +89,11 @@ let abortCtrl = null;        // AbortController
 | 鍓嶇鏋勫缓浜х墿 | `client/dist/` | 闈欐€佹枃浠讹紙HTML/JS/CSS锛?|
 | asar 鎵撳寘 | `release/win-unpacked/resources/app.asar` | Electron asar 褰掓。 |
 
+## Workspace 状态
+
+`WorkspaceApproval` 仅包含主进程生成的一次性 `id`、动作类型和摘要。renderer 只能发送 `approve({ id })` 或 `deny({ id })`，未知或重放 id 必须失败。终端状态包括 `cwd`、`branch`、`terminalRunning` 和输出事件；终端由主进程持有持久 `cmd.exe` 会话，支持 start/write/kill，标准输入输出不提供完整 PTY resize。
+
+Pi tool permission request 由 RPC extension 产生：`{ id, method: "select", title, message, options }`。renderer 只回传该 `id` 对应的选择，主进程转发 `extension_ui_response`；extension 不接受 renderer 传入的工具名、路径或命令作为授权依据。
+
+Workspace Git 状态中的 `worktrees` 是 `{ path, head, branch }[]` 结构化列表。终端协议包含 `terminal-start`、`terminal-write`、`terminal-resize`、`terminal-kill`；当前 cmd.exe 后端返回 resize unsupported，不向 GUI 暴露 resize 控件。
+

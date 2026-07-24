@@ -5,6 +5,7 @@ import { MessageContent } from "./components/MessageContent";
 import { type Message, type ToolCall } from "./hooks/useConversations";
 import { RuntimeBar, type RuntimeState } from "./components/RuntimeBar";
 import { AgentConsole } from "./components/AgentConsole";
+import { WorkspacePanel } from "./components/WorkspacePanel";
 
 export class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
   constructor(props: any) {
@@ -577,6 +578,7 @@ function App() {
   return (
     <ErrorBoundary>
     <div className="app-container">
+      <WorkspacePanel />
       {extensionRequest && (
         <div className="extension-overlay" role="dialog" aria-modal="true" aria-label={extensionRequest.title || "Extension request"}>
           <div className="extension-dialog">

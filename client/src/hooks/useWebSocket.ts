@@ -11,6 +11,7 @@ type CagentBridge = {
     onEvent: (handler: (message: WsMessage) => void) => () => void;
     isAvailable?: boolean;
   };
+  workspace?: { request: (type: string, payload?: any) => Promise<any>; onEvent: (handler: (message: WsMessage) => void) => () => void };
 };
 
 declare global {
