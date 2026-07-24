@@ -1,7 +1,12 @@
 // Full flow test: AgentSession with DeepSeek
 import { ModelRuntime, SessionManager, SettingsManager, createAgentSession } from "@earendil-works/pi-coding-agent";
 
-const API_KEY = "sk-2e6d7c7a501e41989aa7647030a76088";
+const API_KEY = process.env.CAGENT_TEST_API_KEY;
+
+if (!API_KEY) {
+  console.error("CAGENT_TEST_API_KEY is required for the provider API test.");
+  process.exit(2);
+}
 
 async function main() {
   // 1. Create ModelRuntime

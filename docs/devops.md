@@ -111,4 +111,5 @@ Electron 窗口白屏。
 |------|------|
 | `ANTHROPIC_API_KEY` | Anthropic API 密钥（系统级，应用内也可设置） |
 | `OPENAI_API_KEY` | OpenAI API 密钥（备用） |
+| `CAGENT_TEST_API_KEY` | 仅供需要真实 provider 的本地测试使用；不得写入脚本、文档或 Git |
 | `PORT` | 服务端口（默认 4120） |

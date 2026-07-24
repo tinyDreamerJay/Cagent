@@ -3,7 +3,12 @@ import { spawn } from "child_process";
 import { WebSocket } from "ws";
 
 const SERVER_PORT = 4121; // Use non-standard port to avoid conflicts
-const API_KEY = "sk-2e6d7c7a501e41989aa7647030a76088";
+const API_KEY = process.env.CAGENT_TEST_API_KEY;
+
+if (!API_KEY) {
+  console.error("CAGENT_TEST_API_KEY is required for the provider E2E test.");
+  process.exit(2);
+}
 
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -13,7 +18,7 @@ async function startServer() {
   return new Promise((resolve, reject) => {
     const env = { ...process.env, PORT: String(SERVER_PORT) };
     const child = spawn("node", ["electron/server.cjs"], {
-      cwd: "D:/Cagent",
+      cwd: process.cwd(),
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
