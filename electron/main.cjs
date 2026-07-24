@@ -278,11 +278,12 @@ function startPiRpc(cwd) {
     const rpcEntry = path.join(__dirname, "..", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "rpc-entry.js");
     const ccswitchExt = path.join(__dirname, "ccswitch-provider.cjs");
     const deepseekExt = path.join(__dirname, "deepseek-provider.cjs");
+    const permissionGateExt = path.join(__dirname, "permission-gate.cjs");
     const ccswitch = loadCcswitchCodexConfig();
     if (ccswitch && !runtimeApiKeys.has(ccswitch.providerId)) {
       runtimeApiKeys.set(ccswitch.providerId, ccswitch.apiKey);
     }
-    const args = [rpcEntry, "--extension", deepseekExt];
+    const args = [rpcEntry, "--extension", permissionGateExt, "--extension", deepseekExt];
     if (ccswitch) args.push("--extension", ccswitchExt);
     const childEnv = {
       ...process.env,
