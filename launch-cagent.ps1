@@ -8,8 +8,8 @@ if ($proc) {
 Get-Process -Name "Cagent" -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 1
 
-# Start with visible console for debugging
-$proc = Start-Process -FilePath "D:\Cagent\release\win-unpacked\Cagent.exe" -WorkingDirectory "D:\Cagent\release\win-unpacked" -PassThru
+# Keep the agent workspace at the repository root; the executable itself lives in release.
+$proc = Start-Process -FilePath "D:\Cagent\release\win-unpacked\Cagent.exe" -WorkingDirectory "D:\Cagent" -PassThru
 Write-Host "Cagent started (PID: $($proc.Id))"
 Write-Host "Close this window to stop Cagent"
 $proc.WaitForExit()

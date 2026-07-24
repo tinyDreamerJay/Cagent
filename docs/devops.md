@@ -43,6 +43,22 @@ npm run package    # electron-builder 打包
 
 输出在 `release/win-unpacked/`（Cagent.exe + 依赖文件）。
 
+### 桌面快捷方式验收
+
+桌面端是最终用户入口。修改 `client/`、`electron/`、IPC、pi RPC 或打包配置后，必须重新运行 `npm run package`，然后核对并从 `C:\Users\28584\Desktop\Cagent.lnk` 启动。
+
+当前启动链路为：
+
+```text
+C:\Users\28584\Desktop\Cagent.lnk
+  -> D:\Cagent\launch-cagent.ps1
+  -> D:\Cagent\release\win-unpacked\Cagent.exe
+```
+
+`launch-cagent.ps1` 必须以 `D:\Cagent` 为工作目录启动应用；不得使用 `release/win-unpacked` 作为工作目录，否则文件树和 pi 会话会错误地落到发行目录。
+
+最终验收至少确认：主窗口来自上述 EXE、默认项目根目录正确、消息能收到模型回复、工具操作出现审批并可执行，以及 680x400 最小逻辑窗口没有重叠或水平溢出。浏览器/Vite 检查只能作为中间验证。
+
 ### 打包配置
 
 `package.json` 中的 `build` 字段：

@@ -22,11 +22,12 @@
 
 | 文档 | 内容 | 谁该读 |
 |------|------|--------|
-| [README.md](../README.md) | 项目概述、快速开始、技术栈 | 所有人 |
-| [docs/arch.md](./arch.md) | 架构约定：三层结构、WebSocket 协议、数据流 | 改代码前必读 |
-| [docs/business-rules.md](./business-rules.md) | 业务约束：API Key 管理、会话流程、工具执行、错误处理 | 改业务逻辑前必读 |
-| [docs/data-model.md](./data-model.md) | 数据模型：WebSocket 消息类型、前端状态、会话结构 | 改数据逻辑前 |
-| [docs/devops.md](./devops.md) | 工程规范：开发流程、构建打包、已知问题 | 部署/打包时读 |
+| [README.md](./README.md) | 项目概述、快速开始、技术栈 | 所有人 |
+| [docs/arch.md](./docs/arch.md) | 架构约定：三层结构、WebSocket 协议、数据流 | 改代码前必读 |
+| [docs/business-rules.md](./docs/business-rules.md) | 业务约束：API Key 管理、会话流程、工具执行、错误处理 | 改业务逻辑前必读 |
+| [docs/data-model.md](./docs/data-model.md) | 数据模型：WebSocket 消息类型、前端状态、会话结构 | 改数据逻辑前 |
+| [docs/devops.md](./docs/devops.md) | 工程规范：开发流程、构建打包、已知问题 | 部署/打包时读 |
+| [CHANGELOG.md](./CHANGELOG.md) | 按日期记录问题、改动、验证与影响范围 | 每次实质改动后更新 |
 
 ## 版本
 

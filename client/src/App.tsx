@@ -42,7 +42,7 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(() => window.innerWidth > 760);
   const [inspectorTab, setInspectorTab] = useState<"files" | "git" | "terminal" | "resources" | "usage">("files");
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const [sending, setSending] = useState(false);
