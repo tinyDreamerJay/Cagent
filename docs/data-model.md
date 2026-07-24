@@ -89,3 +89,7 @@ let abortCtrl = null;        // AbortController
 | 鍓嶇鏋勫缓浜х墿 | `client/dist/` | 闈欐€佹枃浠讹紙HTML/JS/CSS锛?|
 | asar 鎵撳寘 | `release/win-unpacked/resources/app.asar` | Electron asar 褰掓。 |
 
+## Workspace 状态
+
+`WorkspaceApproval` 仅包含主进程生成的一次性 `id`、动作类型和摘要。renderer 只能发送 `approve({ id })` 或 `deny({ id })`，未知或重放 id 必须失败。终端状态包括 `cwd`、`branch`、`terminalRunning` 和输出事件；终端由主进程持有持久 `cmd.exe` 会话，支持 start/write/kill，标准输入输出不提供完整 PTY resize。
+

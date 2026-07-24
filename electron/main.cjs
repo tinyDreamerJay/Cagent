@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, screen } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, screen, dialog } = require("electron");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -210,6 +210,8 @@ function handlePiLine(line) {
 }
 
 let currentCwd = process.cwd();
+const pendingWorkspaceApprovals = new Map();
+let terminalSession = null;
 
 function resolveWorkspacePath(input = ".") {
   const root = path.resolve(currentCwd);
@@ -217,9 +219,11 @@ function resolveWorkspacePath(input = ".") {
   if (target !== root && !target.startsWith(root + path.sep)) throw new Error("路径超出当前工作目录边界");
   return target;
 }
-function workspaceApproval(type, payload) {
-  sendToRenderer("workspace:approval", { id: `approval-${Date.now()}`, type, payload });
-  return { approved: false, requiresApproval: true };
+function workspaceApproval(action) {
+  const id = `approval-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  pendingWorkspaceApprovals.set(id, action);
+  sendToRenderer("workspace:approval", { id, type: action.type, summary: action.summary });
+  return { approved: false, requiresApproval: true, id, type: action.type, summary: action.summary };
 }
 function runGit(args) {
   return new Promise((resolve, reject) => execFile("git", args, { cwd: currentCwd, windowsHide: true, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => error ? reject(new Error(stderr || error.message)) : resolve(stdout)));
@@ -229,21 +233,41 @@ ipcMain.handle("workspace:request", async (_event, message) => {
   const type = message?.type;
   const p = message?.payload || {};
   if (type === "root") return { cwd: currentCwd };
+  if (type === "choose-directory") {
+    const result = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory", "createDirectory"] });
+    if (result.canceled || !result.filePaths[0]) return { cancelled: true };
+    const selected = path.resolve(result.filePaths[0]);
+    restartingPi = true; stopPiRpc();
+    try { await startPiRpc(selected); await initializeRendererSession(); } finally { restartingPi = false; }
+    sendToRenderer("cwd:updated", { cwd: selected });
+    return { cwd: selected };
+  }
   if (type === "list") {
     const dir = resolveWorkspacePath(p.path || ".");
     const entries = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => ![".git", "node_modules", "release"].includes(e.name)).sort((a,b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
     return { path: path.relative(currentCwd, dir) || ".", entries: entries.map((e) => ({ name: e.name, directory: e.isDirectory() })) };
   }
   if (type === "read") { const file = resolveWorkspacePath(p.path); const stat = fs.statSync(file); if (stat.size > 1024 * 1024) throw new Error("文件过大，拒绝预览"); return { path: p.path, content: fs.readFileSync(file, "utf8") }; }
-  if (type === "git-status") return { status: await runGit(["status", "--short"]), branch: String(await runGit(["branch", "--show-current"])).trim(), diff: await runGit(["diff", "--stat"]) };
-  if (["git-stage", "git-commit", "git-branch"].includes(type)) return workspaceApproval(type, p);
-  if (type === "terminal") return workspaceApproval(type, { command: String(p.command || "") });
+  if (type === "git-status") return { status: await runGit(["status", "--short"]), branch: String(await runGit(["branch", "--show-current"])).trim(), diff: await runGit(["diff", "--stat"]), worktrees: await runGit(["worktree", "list", "--porcelain"]) };
+  if (type === "git-stage") return workspaceApproval({ type, paths: (p.paths || []).map((x) => path.relative(currentCwd, resolveWorkspacePath(x))), summary: `暂存 ${p.paths?.length || 0} 个文件` });
+  if (type === "git-commit") return workspaceApproval({ type, message: String(p.message || "Update").slice(0, 200), summary: `提交: ${String(p.message || "Update").slice(0, 80)}` });
+  if (type === "git-branch") return workspaceApproval({ type, name: String(p.name || "codex/workspace").replace(/[^\w./-]/g, "-").slice(0, 80), summary: `创建分支 ${p.name}` });
+  if (type === "worktree-add") return workspaceApproval({ type, name: String(p.name || "codex-worktree").replace(/[^\w.-]/g, "-"), target: resolveWorkspacePath(p.target || "../" + String(p.name || "codex-worktree")), summary: `创建 worktree ${p.name}` });
+  if (type === "terminal-start") { if (!terminalSession) { terminalSession = spawn("cmd.exe", ["/d", "/q"], { cwd: currentCwd, windowsHide: true }); terminalSession.stdout.on("data", (d) => sendToRenderer("terminal:data", { data: d.toString() })); terminalSession.stderr.on("data", (d) => sendToRenderer("terminal:data", { data: d.toString(), error: true })); terminalSession.on("close", (code) => { sendToRenderer("terminal:status", { running: false, code }); terminalSession = null; }); } return { running: true }; }
+  if (type === "terminal-write") { if (!terminalSession?.stdin?.writable) throw new Error("终端会话未启动"); terminalSession.stdin.write(String(p.data || "") + "\r\n"); return { running: true }; }
+  if (type === "terminal-kill") { terminalSession?.kill(); terminalSession = null; return { running: false }; }
+  if (type === "terminal") return workspaceApproval({ type: "terminal-write", data: String(p.command || ""), summary: `执行命令: ${String(p.command || "").slice(0, 100)}` });
   if (type === "approve") {
-    if (p.type === "git-stage") return { output: await runGit(["add", "--", ...(p.paths || [])]) };
-    if (p.type === "git-commit") return { output: await runGit(["commit", "-m", String(p.message || "Update")]) };
-    if (p.type === "git-branch") return { output: await runGit(["switch", "-c", String(p.name || "codex/workspace")]) };
-    if (p.type === "terminal") return new Promise((resolve) => { const child = spawn(process.platform === "win32" ? "cmd.exe" : "sh", process.platform === "win32" ? ["/d", "/s", "/c", p.command] : ["-lc", p.command], { cwd: currentCwd, windowsHide: true }); let output = ""; child.stdout.on("data", (d) => { output += d; sendToRenderer("terminal:data", { data: d.toString() }); }); child.stderr.on("data", (d) => { output += d; sendToRenderer("terminal:data", { data: d.toString(), error: true }); }); child.on("close", (code) => resolve({ output, code })); });
+    const action = pendingWorkspaceApprovals.get(String(p.id || ""));
+    if (!action) throw new Error("审批票据无效、已拒绝或已使用");
+    pendingWorkspaceApprovals.delete(String(p.id));
+    if (action.type === "git-stage") return { output: await runGit(["add", "--", ...action.paths]) };
+    if (action.type === "git-commit") return { output: await runGit(["commit", "-m", action.message]) };
+    if (action.type === "git-branch") return { output: await runGit(["switch", "-c", action.name]) };
+    if (action.type === "worktree-add") return { output: await runGit(["worktree", "add", action.target, action.name]) };
+    if (action.type === "terminal-write") { if (!terminalSession?.stdin?.writable) throw new Error("终端会话未启动"); terminalSession.stdin.write(action.data + "\r\n"); return { running: true }; }
   }
+  if (type === "deny") { pendingWorkspaceApprovals.delete(String(p.id || "")); return { denied: true }; }
   throw new Error(`未知 workspace 操作: ${type}`);
 });
 
