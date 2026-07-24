@@ -1,24 +1,26 @@
  import { useState, useCallback, useRef, useEffect } from "react";
- 
+
  const STORAGE_KEY = "cagent_conversations";
  const MAX_CONVERSATIONS = 50;
- 
- export interface ToolCall {
-   id: string;
-   name: string;
-   params: string;
-   result?: string;
-   collapsed: boolean;
- }
- 
- export interface Message {
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  params: string;
+  result?: string;
+  status?: "running" | "done" | "error";
+  collapsed: boolean;
+}
+
+export interface Message {
    id: string;
    role: "user" | "assistant" | "error";
    text: string;
    images?: { data: string; mimeType: string }[];
-   toolCalls?: ToolCall[];
- }
- 
+  toolCalls?: ToolCall[];
+  thinking?: string;
+}
+
  export interface Conversation {
    id: string;
    title: string;

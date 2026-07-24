@@ -975,6 +975,20 @@ body {
 .agent-console-actions { flex-wrap: wrap; }
 .agent-console-result, .agent-console-data pre { margin: 8px 0 0; padding: 8px; max-height: 160px; overflow: auto; white-space: pre-wrap; color: var(--text-secondary); background: var(--bg-tertiary); border: 1px solid var(--border); }
 .agent-console-data ul { margin: 8px 0 0; padding-left: 18px; max-height: 120px; overflow: auto; }
+.queue-display, .session-tree, .fork-list { margin-top: 8px; padding: 8px; border: 1px solid var(--border); background: var(--bg-tertiary); }
+.queue-display > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; padding: 3px 0; color: var(--text-secondary); }
+.queue-display strong { color: var(--accent); font-size: 11px; }
+.session-tree > strong, .fork-list > strong { display: block; margin-bottom: 6px; color: var(--text-muted); }
+.session-tree-node { margin: 4px 0 0 10px; padding-left: 8px; border-left: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.fork-list button { display: block; width: 100%; margin-top: 4px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-live { color: var(--warning); font-size: 11px; }
+.thinking-block { margin-top: 10px; color: var(--text-secondary); font-size: 12px; }
+.thinking-block summary { cursor: pointer; color: var(--accent); }
+.thinking-block pre { max-height: 180px; overflow: auto; white-space: pre-wrap; }
+.tool-status { margin-right: 8px; font-size: 10px; color: var(--text-muted); }
+.tool-status.running { color: var(--warning); }.tool-status.done { color: var(--success); }.tool-status.error { color: var(--error); }
+.extension-widget { margin: 0 28px 8px; padding: 8px 10px; border-left: 2px solid var(--accent); background: var(--bg-tertiary); color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; }
+.queue-btn { min-height: 32px; padding: 0 10px; font-size: 11px; }.stop-btn { color: var(--error); }
 
 .extension-overlay { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 20px; background: rgba(0, 0, 0, 0.62); }
 .extension-dialog { width: min(540px, 100%); padding: 20px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.42); }

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import type { RuntimeState } from "./RuntimeBar";
 
 type Command = { name: string; description?: string; source: string };
+type ForkMessage = { entryId: string; text: string };
+type TreeNode = { id?: string; entry?: { id?: string; type?: string; message?: { role?: string; content?: unknown } }; children?: TreeNode[] };
 
 interface AgentConsoleProps {
   state: RuntimeState | null;
@@ -11,9 +13,19 @@ interface AgentConsoleProps {
   stats: Record<string, unknown> | null;
   exportedPath: string;
   bashOutput: string;
+  queue: { steering: string[]; followUp: string[] };
+  tree: TreeNode[];
+  forkMessages: ForkMessage[];
 }
 
-export function AgentConsole({ state, disabled, onCommand, commands, stats, exportedPath, bashOutput }: AgentConsoleProps) {
+function nodeLabel(node: TreeNode) {
+  const entry = node.entry;
+  const content = entry?.message?.content;
+  const text = typeof content === "string" ? content : Array.isArray(content) ? content.map((part: any) => part?.text || part?.thinking || "").join("") : "";
+  return text || entry?.type || node.id || "Session entry";
+}
+
+export function AgentConsole({ state, disabled, onCommand, commands, stats, exportedPath, bashOutput, queue, tree, forkMessages }: AgentConsoleProps) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [bash, setBash] = useState("");
@@ -67,7 +79,7 @@ export function AgentConsole({ state, disabled, onCommand, commands, stats, expo
       <div className="agent-console-actions">
         <button type="button" onClick={() => onCommand("session:stats")} disabled={disabled}>Refresh stats</button>
         <button type="button" onClick={() => onCommand("session:commands")} disabled={disabled}>Refresh commands</button>
-        <button type="button" onClick={() => onCommand("session:tree")} disabled={disabled}>Session tree</button>
+        <button type="button" onClick={() => { onCommand("session:tree"); onCommand("session:fork-messages"); }} disabled={disabled}>Session tree</button>
         <button type="button" onClick={() => onCommand("session:clone")} disabled={disabled}>Clone</button>
         <button type="button" onClick={() => onCommand("session:abort-retry")} disabled={disabled}>Abort retry</button>
       </div>
@@ -82,10 +94,20 @@ export function AgentConsole({ state, disabled, onCommand, commands, stats, expo
         <button type="button" onClick={() => onCommand("session:abort-bash")} disabled={disabled}>Stop</button>
       </div>
       {bashOutput && <pre className="agent-console-result">{bashOutput}</pre>}
+      {(queue.steering.length > 0 || queue.followUp.length > 0) && <div className="agent-console-data queue-display">
+        {queue.steering.map((text, index) => <div key={`steer-${index}`}><strong>Steer</strong><span>{text}</span></div>)}
+        {queue.followUp.map((text, index) => <div key={`follow-${index}`}><strong>Follow-up</strong><span>{text}</span></div>)}
+      </div>}
+      {tree.length > 0 && <div className="agent-console-data session-tree"><strong>Session tree</strong>{tree.map((node, index) => <TreeItem key={node.id || index} node={node} />)}</div>}
+      {forkMessages.length > 0 && <div className="agent-console-data fork-list"><strong>Fork from a user message</strong>{forkMessages.map((message) => <button key={message.entryId} type="button" onClick={() => onCommand("session:fork", { entryId: message.entryId })} disabled={disabled}>{message.text}</button>)}</div>}
       {(stats || commands.length > 0) && <div className="agent-console-data">
         {stats && <pre>{JSON.stringify(stats, null, 2)}</pre>}
         {commands.length > 0 && <ul>{commands.map((command) => <li key={`${command.source}-${command.name}`}>/{command.name}{command.description ? ` - ${command.description}` : ""}</li>)}</ul>}
       </div>}
     </section>
   );
+}
+
+function TreeItem({ node }: { node: TreeNode }) {
+  return <div className="session-tree-node"><span title={node.id}>{nodeLabel(node)}</span>{node.children?.map((child, index) => <TreeItem key={child.id || index} node={child} />)}</div>;
 }

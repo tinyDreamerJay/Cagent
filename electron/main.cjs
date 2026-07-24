@@ -29,6 +29,7 @@ let availableModels = [];
 const runtimeApiKeys = new Map();
 let restartingPi = false;
 const pendingPiRequests = new Map();
+let pendingGuiMessages = { steering: [], followUp: [] };
 
 function rejectPendingPiRequests(error) {
   for (const pending of pendingPiRequests.values()) {
@@ -157,14 +158,20 @@ async function publishPiMessages() {
 function handlePiEvent(event) {
   if (event.type === "message_update") {
     const delta = event.assistantMessageEvent;
-    if ((delta?.type === "text_delta" || delta?.type === "thinking_delta") && delta.delta) {
+    if (delta?.type === "text_delta" && delta.delta) {
       sendToRenderer("token", { text: delta.delta });
+    } else if (delta?.type === "thinking_delta" && delta.delta) {
+      sendToRenderer("thinking:delta", { text: delta.delta });
     }
   } else if (event.type === "tool_execution_start") {
-    sendToRenderer("tool:call", { name: event.toolName || "tool", params: event.args || {} });
+    sendToRenderer("tool:call", { id: event.toolCallId, name: event.toolName || "tool", params: event.args || {} });
+  } else if (event.type === "tool_execution_update") {
+    sendToRenderer("tool:update", { id: event.toolCallId, name: event.toolName || "tool", output: toolResultText(event.partialResult) });
   } else if (event.type === "tool_execution_end") {
-    sendToRenderer("tool:result", { name: event.toolName || "tool", output: toolResultText(event.result) });
+    sendToRenderer("tool:result", { id: event.toolCallId, name: event.toolName || "tool", output: toolResultText(event.result), isError: Boolean(event.isError) });
   } else if (event.type === "agent_settled") {
+    pendingGuiMessages = { steering: [], followUp: [] };
+    sendToRenderer("session:queue", pendingGuiMessages);
     sendToRenderer("message:done", {});
   } else if (event.type === "agent_end") {
     const lastAssistant = [...(event.messages || [])].reverse().find((message) => message?.role === "assistant");
@@ -316,6 +323,7 @@ async function publishSessionState(state) {
   const currentState = state || await sendPiCommand({ type: "get_state" });
   const levels = await sendPiCommand({ type: "get_available_thinking_levels" });
   sendToRenderer("session:state", { ...currentState, cwd: currentCwd });
+  sendToRenderer("session:queue", pendingGuiMessages);
   sendToRenderer("session:thinking-levels", levels?.levels || []);
   return currentState;
 }
@@ -349,15 +357,26 @@ ipcMain.on("pi:command", async (_event, message) => {
       return await sendPiCommand({ type: "prompt", message: payload.text || "", images: payload.images });
     }
     if (message?.type === "session:steer") {
-      return await sendPiCommand({ type: "steer", message: payload.text || "", images: payload.images });
+      await sendPiCommand({ type: "steer", message: payload.text || "", images: payload.images });
+      pendingGuiMessages.steering.push(String(payload.text || ""));
+      sendToRenderer("session:queue", pendingGuiMessages);
+      await publishSessionState();
+      return;
     }
     if (message?.type === "session:follow-up") {
-      return await sendPiCommand({ type: "follow_up", message: payload.text || "", images: payload.images });
+      await sendPiCommand({ type: "follow_up", message: payload.text || "", images: payload.images });
+      pendingGuiMessages.followUp.push(String(payload.text || ""));
+      sendToRenderer("session:queue", pendingGuiMessages);
+      await publishSessionState();
+      return;
     }
     if (message?.type === "session:abort") return await sendPiCommand({ type: "abort" });
     if (message?.type === "session:new") {
       const result = await sendPiCommand({ type: "new_session" });
-      if (!result?.cancelled) await initializeRendererSession();
+      if (!result?.cancelled) {
+        pendingGuiMessages = { steering: [], followUp: [] };
+        await initializeRendererSession();
+      }
       return;
     }
     if (message?.type === "session:set-thinking") {
@@ -411,6 +430,11 @@ ipcMain.on("pi:command", async (_event, message) => {
       sendToRenderer("session:tree", result || { tree: [], leafId: null });
       return;
     }
+    if (message?.type === "session:fork-messages") {
+      const result = await sendPiCommand({ type: "get_fork_messages" });
+      sendToRenderer("session:fork-messages", result?.messages || []);
+      return;
+    }
     if (message?.type === "session:entries") {
       const result = await sendPiCommand({ type: "get_entries", since: payload.since });
       sendToRenderer("session:entries", result || { entries: [], leafId: null });
@@ -418,12 +442,18 @@ ipcMain.on("pi:command", async (_event, message) => {
     }
     if (message?.type === "session:fork") {
       const result = await sendPiCommand({ type: "fork", entryId: payload.entryId });
-      if (!result?.cancelled) await initializeRendererSession();
+      if (!result?.cancelled) {
+        pendingGuiMessages = { steering: [], followUp: [] };
+        await initializeRendererSession();
+      }
       return;
     }
     if (message?.type === "session:clone") {
       const result = await sendPiCommand({ type: "clone" });
-      if (!result?.cancelled) await initializeRendererSession();
+      if (!result?.cancelled) {
+        pendingGuiMessages = { steering: [], followUp: [] };
+        await initializeRendererSession();
+      }
       return;
     }
     if (message?.type === "session:set-name") {
@@ -469,7 +499,10 @@ ipcMain.on("pi:command", async (_event, message) => {
         throw new Error("The selected pi session is not available in the current project");
       }
       const result = await sendPiCommand({ type: "switch_session", sessionPath });
-      if (!result?.cancelled) await initializeRendererSession();
+      if (!result?.cancelled) {
+        pendingGuiMessages = { steering: [], followUp: [] };
+        await initializeRendererSession();
+      }
       return;
     }
     if (message?.type === "auth:providers") return await initializeRendererSession();

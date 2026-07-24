@@ -6,6 +6,9 @@ export interface RuntimeState {
   autoRetryEnabled?: boolean;
   steeringMode?: "all" | "one-at-a-time";
   followUpMode?: "all" | "one-at-a-time";
+  isStreaming?: boolean;
+  isCompacting?: boolean;
+  pendingMessageCount?: number;
   messageCount?: number;
   cwd?: string;
 }
@@ -37,6 +40,7 @@ export function RuntimeBar({ state, thinkingLevels, disabled, onThinkingChange, 
       </div>
 
       <div className="runtime-controls">
+        {(state?.isStreaming || state?.isCompacting) && <span className="runtime-live">{state.isCompacting ? "Compacting" : "Generating"}</span>}
         <label className="runtime-select-label">
           <span>Thinking</span>
           <select

@@ -53,6 +53,8 @@
 - 思考等级、自动压缩和手动压缩均通过 Electron 主进程调用 pi RPC；前端不得自行模拟这些状态
 - `Compact` 会压缩当前 pi 会话上下文，避免长对话占满模型上下文；执行期间显示运行状态
 - 发送中禁用运行控制，避免在 pi 正在生成时切换会话状态
+- 发送中输入框仍可用于提交 `steer` 或 `follow-up`：前者交给 pi 立即插入，后者等待当前轮次完成。队列面板仅是当前 GUI 已提交消息的只读投影，不能删除或重排 pi 内部队列。
+- Fork 必须由 pi 返回的用户消息 `entryId` 发起；Clone 仅在当前 session 存在 leaf entry 时可用。
 
 ## 工具执行
 
@@ -70,6 +72,13 @@ pi SDK 自带四个内置工具：
 - 工具调用默认展开，点击标题可折叠
 - 参数和结果分开显示，结果区有分隔线
 - 结果超过 8000 字符自动截断（显示 `... [truncated]`）
+- 工具块按 `toolCallId` 更新 running、partial output、done/error 状态，不得仅按工具名匹配并发调用。
+- Thinking delta 单独折叠显示，不得混入最终 assistant 正文。
+
+## Extension UI
+
+- `setWidget` 仅渲染 RPC 允许的字符串行，位置为输入框上方或下方；传入 `undefined` 时移除对应 key 的 widget。
+- `set_editor_text` 覆盖当前输入并聚焦编辑器；它不自动发送 prompt。
 
 ## 错误处理
 

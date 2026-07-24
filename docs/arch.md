@@ -86,6 +86,8 @@ App
 | `session:init` | `{}` | 查询 pi 状态和可用模型 |
 | `session:prompt` | `{ text, model, images? }` | 调用 pi `prompt` |
 | `session:abort` | `{}` | 调用 pi `abort` |
+| `session:steer` | `{ text, images? }` | 生成中插入 steering 消息 |
+| `session:follow-up` | `{ text, images? }` | 将消息排到当前生成 settled 后 |
 | `session:new` | `{}` | 调用 pi `new_session` 并刷新运行状态 |
 | `session:list` | `{}` | 读取当前项目的 pi 持久化会话列表 |
 | `session:switch` | `{ path }` | 校验并调用 pi `switch_session`，加载该会话历史 |
@@ -93,6 +95,10 @@ App
 | `session:set-auto-compaction` | `{ enabled }` | 更新 pi 自动压缩开关 |
 | `session:compact` | `{}` | 调用 pi `compact` 压缩当前上下文 |
 | `session:stats` | `{}` | 查询当前 pi 会话统计信息 |
+| `session:tree` | `{}` | 读取当前会话的持久化分支树 |
+| `session:fork-messages` | `{}` | 读取可供 fork 的用户消息 entry |
+| `session:fork` | `{ entryId }` | 从指定用户消息创建分支会话 |
+| `session:clone` | `{}` | 在当前 leaf 克隆会话 |
 | `auth:set-key` | `{ provider, apiKey }` | 更新运行时凭据并重启 pi RPC |
 | `auth:providers` | `{}` | 查询 pi 可用 provider |
 
@@ -102,6 +108,7 @@ App
 |------|---------|------|
 | `session:ready` | `{}` | 初始化完成 |
 | `token` | `{ text }` | 流式 token |
+| `thinking:delta` | `{ text }` | 独立于正文的流式思考内容 |
 | `message:user` | `{ text }` | 用户消息回显 |
 | `message:done` | `{}` | 回复完成 |
 | `message:aborted` | `{}` | 回复被中止 |
@@ -112,6 +119,10 @@ App
 | `session:stats` | `SessionStats` | 当前 pi 会话统计信息 |
 | `tool:call` | `{ name, params }` | 工具调用开始 |
 | `tool:result` | `{ name, output }` | 工具调用结果 |
+| `tool:update` | `{ id, name, output }` | 运行中工具的部分结果 |
+| `session:queue` | `{ steering, followUp }` | 本 GUI 已提交且尚未 settled 的队列投影 |
+| `session:tree` | `{ tree, leafId }` | 会话 tree 数据 |
+| `session:fork-messages` | `[{ entryId, text }]` | fork 可选的用户消息 |
 | `auth:key-ready` | `{ provider, models, source? }` | provider 已有可用凭据 |
 | `auth:providers` | `string[]` | 可用提供商列表 |
 | `error` | `{ message }` | 错误消息 |
@@ -132,6 +143,10 @@ App
 1. 主进程发送 `{ type: "prompt", message, images }`
 2. pi 通过 stdout 输出 `message_update`、工具事件和 `agent_settled`
 3. 主进程把这些事件映射为 renderer 使用的 `token`、`tool:*` 和 `message:done`
+
+生成期间 renderer 允许提交 `steer` 或 `follow-up`。pi RPC 在此版本只暴露待处理数量、不暴露队列内容，因此 GUI 的队列面板只显示由当前 GUI 提交的消息；在 `agent_settled` 时清空该投影。工具状态以 pi 的 `toolCallId` 关联，thinking delta 不得并入 assistant 正文。
+
+Extension 的 RPC UI 事件中，`setWidget` 映射为 editor 上下方的文本 widget，`set_editor_text` 直接更新 renderer 输入框并聚焦；组件工厂、header/footer 等 TUI 专属能力不在 RPC 模式可用范围内。
 
 ## 重要约束
 

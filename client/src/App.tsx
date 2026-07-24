@@ -28,6 +28,10 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
   }
 }
 
+function ExtensionWidget({ lines }: { lines: string[] }) {
+  return <div className="extension-widget">{lines.map((line, index) => <div key={index}>{line}</div>)}</div>;
+}
+
 function App() {
   const { connected, send, subscribe } = useWebSocket();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -50,6 +54,10 @@ function App() {
   const [bashOutput, setBashOutput] = useState("");
   const [extensionRequest, setExtensionRequest] = useState<any>(null);
   const [extensionValue, setExtensionValue] = useState("");
+  const [extensionWidgets, setExtensionWidgets] = useState<Record<string, { lines: string[]; placement: "aboveEditor" | "belowEditor" }>>({});
+  const [queuedMessages, setQueuedMessages] = useState({ steering: [] as string[], followUp: [] as string[] });
+  const [sessionTree, setSessionTree] = useState<any[]>([]);
+  const [forkMessages, setForkMessages] = useState<{ entryId: string; text: string }[]>([]);
   const [runtimeState, setRuntimeState] = useState<RuntimeState | null>(null);
   const [thinkingLevels, setThinkingLevels] = useState<string[]>([]);
   const [piSessions, setPiSessions] = useState<{ id: string; path: string; name: string; updatedAt: number }[]>([]);
@@ -63,6 +71,15 @@ function App() {
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  const updateTool = useCallback((p: { id?: string; name: string; output: string }, status: "running" | "done" | "error") => {
+    setMessages((prev) => prev.map((message) => ({
+      ...message,
+      toolCalls: message.toolCalls?.map((tool) => (p.id ? tool.id === p.id : tool.name === p.name && tool.status === "running")
+        ? { ...tool, result: p.output || tool.result, status }
+        : tool),
+    })));
   }, []);
 
   useEffect(() => {
@@ -123,6 +140,9 @@ function App() {
     unsubs.push(subscribe("session:commands", (value: { name: string; description?: string; source: string }[]) => setCommands(Array.isArray(value) ? value : [])));
     unsubs.push(subscribe("session:exported", (value: { path?: string }) => setExportedPath(value?.path || "")));
     unsubs.push(subscribe("session:bash-result", (value: unknown) => setBashOutput(JSON.stringify(value, null, 2))));
+    unsubs.push(subscribe("session:queue", (value: { steering?: string[]; followUp?: string[] }) => setQueuedMessages({ steering: value?.steering || [], followUp: value?.followUp || [] })));
+    unsubs.push(subscribe("session:tree", (value: { tree?: any[] }) => setSessionTree(value?.tree || [])));
+    unsubs.push(subscribe("session:fork-messages", (value: { entryId: string; text: string }[]) => setForkMessages(Array.isArray(value) ? value : [])));
     unsubs.push(subscribe("pi:extension-ui", (value: any) => {
       if (value?.method === "notify") {
         setStatusMsg(value.message || "");
@@ -134,6 +154,20 @@ function App() {
       }
       if (value?.method === "setTitle" && value.title) {
         document.title = value.title;
+        return;
+      }
+      if (value?.method === "setWidget" && value.widgetKey) {
+        setExtensionWidgets((previous) => {
+          const next = { ...previous };
+          if (Array.isArray(value.widgetLines)) next[value.widgetKey] = { lines: value.widgetLines, placement: value.widgetPlacement === "aboveEditor" ? "aboveEditor" : "belowEditor" };
+          else delete next[value.widgetKey];
+          return next;
+        });
+        return;
+      }
+      if (value?.method === "set_editor_text") {
+        setInput(value.text || "");
+        requestAnimationFrame(() => inputRef.current?.focus());
         return;
       }
       if (value?.id) {
@@ -220,6 +254,16 @@ function App() {
       })
     );
 
+    unsubs.push(subscribe("thinking:delta", (p: { text: string }) => {
+      setMessages((prev) => {
+        const copy = [...prev];
+        const last = copy[copy.length - 1];
+        if (last?.role === "assistant" && last.id === "streaming") copy[copy.length - 1] = { ...last, thinking: `${last.thinking || ""}${p.text || ""}` };
+        else copy.push({ id: "streaming", role: "assistant", text: "", thinking: p.text || "" });
+        return copy;
+      });
+    }));
+
     unsubs.push(
       subscribe("message:done", () => {
         if (rafRef.current) {
@@ -248,14 +292,15 @@ function App() {
     );
 
     unsubs.push(
-      subscribe("tool:call", (p: { name: string; params: any }) => {
+      subscribe("tool:call", (p: { id?: string; name: string; params: any }) => {
         const toolName = typeof p?.name === "string" && p.name.trim() ? p.name : "tool";
         const toolParams = typeof p?.params === "string" ? p.params : (JSON.stringify(p?.params ?? {}, null, 2) || "");
         const toolCall: ToolCall = {
-          id: `tool-${Date.now()}`,
+          id: p.id || `tool-${Date.now()}`,
           name: toolName,
           params: toolParams,
           collapsed: true,
+          status: "running",
         };
         setMessages((prev) => {
           const copy = [...prev];
@@ -266,24 +311,28 @@ function App() {
               toolCalls: [...(last.toolCalls || []), toolCall],
             };
             copy[copy.length - 1] = updated;
+          } else {
+            copy.push({ id: "streaming", role: "assistant", text: "", toolCalls: [toolCall] });
           }
           return copy;
         });
       })
     );
 
+    unsubs.push(subscribe("tool:update", (p: { id?: string; name: string; output: string }) => updateTool(p, "running")));
+
     unsubs.push(
-      subscribe("tool:result", (p: { name: string; output: string }) => {
+      subscribe("tool:result", (p: { id?: string; name: string; output: string; isError?: boolean }) => {
         setMessages((prev) => {
           const copy = [...prev];
           for (let i = copy.length - 1; i >= 0; i--) {
             const tc = copy[i].toolCalls;
             if (tc) {
               for (let j = tc.length - 1; j >= 0; j--) {
-                if (tc[j].name === p.name && !tc[j].result) {
+                if ((p.id ? tc[j].id === p.id : tc[j].name === p.name && !tc[j].result)) {
                   const updated = { ...copy[i] };
                   const updatedTCs = [...(updated.toolCalls || [])];
-                  updatedTCs[j] = { ...updatedTCs[j], result: p.output };
+                  updatedTCs[j] = { ...updatedTCs[j], result: p.output, status: p.isError ? "error" : "done" };
                   updated.toolCalls = updatedTCs;
                   copy[i] = updated;
                   return [...copy];
@@ -338,13 +387,18 @@ function App() {
     );
 
     return () => unsubs.forEach((u) => u());
-  }, [subscribe, send]);
+  }, [subscribe, send, updateTool]);
 
   const handleSend = () => {
     const text = input.trim();
     const images = pendingImagesRef.current;
     if (!text && images.length === 0) return;
-    if (sending) return;
+    if (sending) {
+      send("session:steer", { text, images: images.length > 0 ? images : undefined });
+      setInput("");
+      pendingImagesRef.current = [];
+      return;
+    }
 
     const userMsg: Message = { id: `msg-${Date.now()}`, role: "user", text, images: images.length > 0 ? images : undefined };
     setMessages((prev) => [...prev, userMsg]);
@@ -582,6 +636,9 @@ function App() {
             stats={stats}
             exportedPath={exportedPath}
             bashOutput={bashOutput}
+            queue={queuedMessages}
+            tree={sessionTree}
+            forkMessages={forkMessages}
           />
         </div>
 
@@ -644,6 +701,7 @@ function App() {
                     <span />
                   </span>
                 )}
+                {msg.thinking && <details className="thinking-block"><summary>Thinking</summary><pre>{msg.thinking}</pre></details>}
                 {msg.toolCalls?.map((tc) => (
                   <div key={tc.id} className="tool-block">
                     <div
@@ -653,7 +711,7 @@ function App() {
                       <span className={`tool-block-icon ${tc.name || "tool"}`}>
                         {(tc.name || "tool")[0]?.toUpperCase()}
                       </span>
-                      <span style={{ flex: 1 }}>{tc.name}</span>
+                      <span style={{ flex: 1 }}>{tc.name}</span><span className={`tool-status ${tc.status || "done"}`}>{tc.status === "running" ? "running" : tc.status === "error" ? "failed" : "done"}</span>
                       <span style={{ fontSize: 10 }}>{tc.collapsed ? "expand" : "collapse"}</span>
                     </div>
                     <div className={`tool-block-body ${tc.collapsed ? "collapsed" : ""}`}>
@@ -673,6 +731,7 @@ function App() {
         </div>
 
         <div className="input-container">
+          {Object.entries(extensionWidgets).filter(([, widget]) => widget.placement === "aboveEditor").map(([key, widget]) => <ExtensionWidget key={key} lines={widget.lines} />)}
           {pendingImagesRef.current.length > 0 && (
             <div className="image-preview-bar">
               {pendingImagesRef.current.map((img, i) => (
@@ -719,15 +778,15 @@ function App() {
               value={input}
               onChange={(e) => { setInput(e.target.value); setCommandIndex(0); }}
               onKeyDown={handleKeyDown}
-              placeholder={sending ? "Stop..." : "Ask anything..."}
+              placeholder={sending ? "Queue a steer or follow-up message..." : "Ask anything..."}
               rows={1}
-              disabled={sending || !apiKey || !initDone}
+              disabled={!apiKey || !initDone}
             />
             <button
               className={`send-btn ${sending ? "sending" : ""}`}
-              onClick={sending ? () => send("session:abort") : handleSend}
+              onClick={handleSend}
               disabled={(!input.trim() && pendingImagesRef.current.length === 0 && !sending) || !apiKey || !initDone}
-              title={sending ? "Stop" : "Send"}
+              title={sending ? "Queue steering message" : "Send"}
             >
               {sending ? (
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
@@ -739,7 +798,18 @@ function App() {
                 </svg>
               )}
             </button>
+            {sending && <>
+              <button className="queue-btn" type="button" onClick={() => {
+                const text = input.trim();
+                if (!text) return;
+                send("session:follow-up", { text, images: pendingImagesRef.current });
+                setInput("");
+                pendingImagesRef.current = [];
+              }} disabled={!input.trim()} title="Run after the current response settles">Follow-up</button>
+              <button className="queue-btn stop-btn" type="button" onClick={() => send("session:abort")} title="Stop generating">Stop</button>
+            </>}
           </div>
+          {Object.entries(extensionWidgets).filter(([, widget]) => widget.placement === "belowEditor").map(([key, widget]) => <ExtensionWidget key={key} lines={widget.lines} />)}
         </div>
       </main>
     </div>
