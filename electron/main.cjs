@@ -355,12 +355,15 @@ async function publishRendererAuthState() {
 
 async function publishProviderStatus() {
   const models = await publishRendererAuthState();
-  const ids = [...new Set(models.map((model) => model.provider))];
-  const states = ids.map((provider) => {
+  const runtime = await getAuthRuntime();
+  const stored = new Map((await runtime.listCredentials()).map((item) => [item.providerId, item.type]));
+  const states = runtime.getProviders().map((providerInfo) => {
+    const provider = providerInfo.id;
     const providerModels = models.filter((model) => model.provider === provider).map((model) => model.id);
     const envName = providerEnvName(provider);
-    const configured = runtimeApiKeys.has(provider) || Boolean(process.env[envName]);
-    return { provider, configured, available: providerModels.length > 0, source: runtimeApiKeys.has(provider) ? "runtime" : (process.env[envName] ? "environment" : "pi catalog"), models: providerModels };
+    const auth = providerInfo.auth || {};
+    const configured = stored.has(provider) || runtimeApiKeys.has(provider) || Boolean(process.env[envName]);
+    return { provider, configured, available: providerModels.length > 0, source: stored.has(provider) ? `stored:${stored.get(provider)}` : (runtimeApiKeys.has(provider) ? "runtime" : (process.env[envName] ? "environment" : "catalog")), capabilities: { apiKey: Boolean(auth.apiKey), oauth: Boolean(auth.oauth) }, models: providerModels };
   });
   sendToRenderer("auth:status", states);
   return states;
@@ -536,16 +539,18 @@ ipcMain.on("pi:command", async (_event, message) => {
     if (message?.type === "auth:oauth") {
       const runtime = await getAuthRuntime();
       sendToRenderer("auth:oauth-status", { status: "starting", provider: payload.provider, message: "正在启动 pi OAuth 登录" });
-      await runtime.login(String(payload.provider), "oauth", { openExternal: (url) => { if (!/^https?:\/\//i.test(url)) throw new Error("OAuth URL scheme rejected"); return shell.openExternal(url); }, notify: (event) => sendToRenderer("auth:oauth-event", { provider: payload.provider, event }), prompt: (prompt) => new Promise((resolve, reject) => { const id = `auth-${Date.now()}-${Math.random()}`; authPrompts.set(id, { resolve, reject }); sendToRenderer("auth:oauth-prompt", { id, provider: payload.provider, prompt }); }) });
+      await runtime.login(String(payload.provider), "oauth", { notify: (event) => { if (event.type === "auth_url") { if (!/^https?:\/\//i.test(event.url)) throw new Error("OAuth URL scheme rejected"); shell.openExternal(event.url); } if (event.type === "device_code" && /^https?:\/\//i.test(event.verificationUri)) shell.openExternal(event.verificationUri); sendToRenderer("auth:oauth-event", { provider: payload.provider, event }); }, prompt: (prompt) => new Promise((resolve, reject) => { const id = `auth-${Date.now()}-${Math.random()}`; authPrompts.set(id, { resolve, reject }); sendToRenderer("auth:oauth-prompt", { id, provider: payload.provider, prompt }); }) });
       sendToRenderer("auth:oauth-status", { status: "complete", provider: payload.provider, message: "OAuth 登录完成，凭据已保存到 pi auth store" });
       await publishProviderStatus();
       return;
     }
-    if (message?.type === "auth:prompt-response") { const pending = authPrompts.get(payload.id); if (pending) { authPrompts.delete(payload.id); if (payload.cancelled) pending.reject(new Error("Authentication cancelled")); else pending.resolve(String(payload.value || "")); } return; }
+    if (message?.type === "auth:prompt-response") { const pending = authPrompts.get(payload.id); if (!pending) throw new Error("unknown or replayed auth prompt"); authPrompts.delete(payload.id); if (payload.cancelled) pending.reject(new Error("Authentication cancelled")); else pending.resolve(String(payload.value || "")); return; }
     if (message?.type === "auth:clear") {
       const runtime = await getAuthRuntime();
-      await runtime.removeRuntimeApiKey(String(payload.provider));
-      runtimeApiKeys.delete(String(payload.provider));
+      const provider = String(payload.provider);
+      if ((await runtime.listCredentials()).some((item) => item.providerId === provider)) await runtime.logout(provider);
+      if (runtimeApiKeys.has(provider)) { await runtime.removeRuntimeApiKey(provider); runtimeApiKeys.delete(provider); }
+      restartingPi = true; const old = piProcess; stopPiRpc(); try { await startPiRpc(); await initializeRendererSession(); } finally { restartingPi = false; }
       await publishProviderStatus();
       return;
     }

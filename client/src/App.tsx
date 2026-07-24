@@ -46,7 +46,7 @@ function App() {
   const [availableProviders, setAvailableProviders] = useState<string[]>(["anthropic", "openai", "deepseek"]);
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>({});
   const [providerStates, setProviderStates] = useState<{ provider: string; configured: boolean; source: string; error?: string }[]>([]);
-  const [mcpServers, setMcpServers] = useState<{ name: string; status: string; source: string; error?: string }[]>([]);
+  const [mcpServers, setMcpServers] = useState<{ status: string; source: string; error?: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [initDone, setInitDone] = useState(false);
   const pendingApiKeyRef = useRef<{ key: string; provider: string } | null>(null);

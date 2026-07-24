@@ -17,8 +17,8 @@ interface SidebarProps {
   onCwdChange: (cwd: string) => void;
   mobileOpen: boolean;
   onMobileClose: () => void;
-  providerStates?: { provider: string; configured: boolean; source: string; error?: string }[];
-  mcpServers?: { name: string; status: string; source: string; error?: string }[];
+  providerStates?: any[];
+  mcpServers?: { status: string; source: string; error?: string }[];
   onOAuth?: (provider: string) => void;
 }
 
@@ -30,7 +30,7 @@ const CagentLogo = () => (
   </svg>
 );
 
-export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession, onSessionDelete, apiKey, provider, modelsByProvider, selectedModel, onModelSelect, onApiKeySet, availableProviders, cwd, onCwdChange, mobileOpen, onMobileClose, mcpServers = [], onOAuth }: SidebarProps) {
+export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession, onSessionDelete, apiKey, provider, modelsByProvider, selectedModel, onModelSelect, onApiKeySet, availableProviders, cwd, onCwdChange, mobileOpen, onMobileClose, providerStates = [], mcpServers = [], onOAuth }: SidebarProps) {
   const [keyInput, setKeyInput] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [selProvider, setSelProvider] = useState(provider || (availableProviders?.[0] || "deepseek"));
@@ -143,7 +143,7 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
               <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}{modelsByProvider[p]?.length ? ` (${modelsByProvider[p].length})` : ''}</option>
             ))}
           </select>
-          <input
+          {providerStates.find((item) => item.provider === selProvider)?.capabilities?.apiKey !== false && <input
             type="password"
             value={keyInput}
             onChange={(e) => setKeyInput(e.target.value)}
@@ -155,11 +155,11 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
               }
             }}
             placeholder={`${selProvider === "anthropic" ? "Anthropic" : selProvider === "deepseek" ? "DeepSeek" : "OpenAI"} API Key...`}
-          />
+          />}
           <div className="settings-hint">
             Enter to save &middot; Secret stays in pi runtime
           </div>
-          <button type="button" className="settings-action" onClick={() => onOAuth?.(selProvider)}>Open pi auth terminal</button>
+          {providerStates.find((item) => item.provider === selProvider)?.capabilities?.oauth && <button type="button" className="settings-action" onClick={() => onOAuth?.(selProvider)}>Sign in with OAuth</button>}
           <div className="settings-label">
             Working directory
           </div>
@@ -196,8 +196,7 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
       )}
 
       <div className="sidebar-section">MCP</div>
-      <div className="settings-hint mcp-summary">{mcpServers.length ? `${mcpServers.length} configured server${mcpServers.length > 1 ? "s" : ""}` : "No MCP servers discovered"}</div>
-      {mcpServers.map((server) => <div className="mcp-row" key={server.name}><span>{server.name}</span><small>{server.error || server.status}</small></div>)}
+      <div className="settings-hint mcp-summary">{mcpServers[0]?.error || "Pi 0.81.1 has no built-in MCP"}</div>
 
       <div className="sidebar-section">Sessions</div>
 
