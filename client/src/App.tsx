@@ -6,6 +6,8 @@ import { type Message, type ToolCall } from "./hooks/useConversations";
 import { RuntimeBar, type RuntimeState } from "./components/RuntimeBar";
 import { AgentConsole } from "./components/AgentConsole";
 
+interface ProviderState { provider: string; configured: boolean; available: boolean; source: string; models: string[]; capabilities: { apiKey: boolean; oauth: boolean }; error?: string }
+
 export class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
   constructor(props: any) {
     super(props);
@@ -41,11 +43,11 @@ function App() {
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [cwd, setCwd] = useState(() => localStorage.getItem("cagent_cwd") || "");
-  const [credentialReady, setCredentialReady] = useState(false);
   const [provider, setProvider] = useState(() => localStorage.getItem("cagent_provider") || "");
   const [availableProviders, setAvailableProviders] = useState<string[]>(["anthropic", "openai", "deepseek"]);
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>({});
-  const [providerStates, setProviderStates] = useState<{ provider: string; configured: boolean; source: string; error?: string }[]>([]);
+  const [providerStates, setProviderStates] = useState<ProviderState[]>([]);
+  const credentialReady = Boolean(providerStates.find((item) => item.provider === provider)?.configured && modelsByProvider[provider]?.length);
   const [mcpServers, setMcpServers] = useState<{ status: string; source: string; error?: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [initDone, setInitDone] = useState(false);
@@ -222,7 +224,6 @@ function App() {
 
     unsubs.push(
       subscribe("auth:key-ready", (p: { provider: string; models?: string[]; source?: string }) => {
-        setCredentialReady(true);
         setModelsByProvider((prev) => {
           const updated = { ...prev };
           if (p.models && p.models.length > 0) {
@@ -248,7 +249,7 @@ function App() {
         });
       })
     );
-    unsubs.push(subscribe("auth:status", (p: any[]) => setProviderStates(Array.isArray(p) ? p : [])));
+    unsubs.push(subscribe("auth:status", (p: ProviderState[]) => { const states = Array.isArray(p) ? p : []; setProviderStates(states); setAvailableProviders(states.map((item) => item.provider)); setModelsByProvider(Object.fromEntries(states.filter((item) => item.models?.length).map((item) => [item.provider, item.models]))); }));
     unsubs.push(subscribe("mcp:list", (p: any[]) => setMcpServers(Array.isArray(p) ? p : [])));
     unsubs.push(subscribe("auth:oauth-status", (p: { message?: string }) => setStatusMsg(p?.message || "")));
     unsubs.push(subscribe("auth:oauth-event", (p: any) => setStatusMsg(p?.event?.message || p?.event?.instructions || "OAuth in progress")));
@@ -521,7 +522,6 @@ function App() {
     if (!key) return;
     localStorage.removeItem("cagent_apikey");
     localStorage.setItem("cagent_provider", prov);
-    setCredentialReady(false);
     setProvider(prov);
     setModelsByProvider({});
     setSelectedModel("");

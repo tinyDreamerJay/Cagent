@@ -17,7 +17,7 @@ interface SidebarProps {
   onCwdChange: (cwd: string) => void;
   mobileOpen: boolean;
   onMobileClose: () => void;
-  providerStates?: any[];
+  providerStates?: { provider: string; configured: boolean; available: boolean; source: string; models: string[]; capabilities: { apiKey: boolean; oauth: boolean }; error?: string }[];
   mcpServers?: { status: string; source: string; error?: string }[];
   onOAuth?: (provider: string) => void;
 }

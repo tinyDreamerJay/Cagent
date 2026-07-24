@@ -541,6 +541,8 @@ ipcMain.on("pi:command", async (_event, message) => {
       sendToRenderer("auth:oauth-status", { status: "starting", provider: payload.provider, message: "正在启动 pi OAuth 登录" });
       await runtime.login(String(payload.provider), "oauth", { notify: (event) => { if (event.type === "auth_url") { if (!/^https?:\/\//i.test(event.url)) throw new Error("OAuth URL scheme rejected"); shell.openExternal(event.url); } if (event.type === "device_code" && /^https?:\/\//i.test(event.verificationUri)) shell.openExternal(event.verificationUri); sendToRenderer("auth:oauth-event", { provider: payload.provider, event }); }, prompt: (prompt) => new Promise((resolve, reject) => { const id = `auth-${Date.now()}-${Math.random()}`; authPrompts.set(id, { resolve, reject }); sendToRenderer("auth:oauth-prompt", { id, provider: payload.provider, prompt }); }) });
       sendToRenderer("auth:oauth-status", { status: "complete", provider: payload.provider, message: "OAuth 登录完成，凭据已保存到 pi auth store" });
+      restartingPi = true;
+      try { stopPiRpc(); await startPiRpc(); await initializeRendererSession(); } finally { restartingPi = false; }
       await publishProviderStatus();
       return;
     }
