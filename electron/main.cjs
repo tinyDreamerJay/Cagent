@@ -120,6 +120,23 @@ function messageContentText(message) {
     .join("\n");
 }
 
+function scanPiResources() {
+  const roots = [
+    ["skill", path.join(os.homedir(), ".pi", "agent", "skills")],
+    ["prompt", path.join(os.homedir(), ".pi", "agent", "prompts")],
+    ["extension", path.join(os.homedir(), ".pi", "agent", "extensions")],
+    ["command", path.join(os.homedir(), ".pi", "agent", "commands")],
+  ];
+  const resources = [];
+  for (const [kind, root] of roots) {
+    if (!fs.existsSync(root)) continue;
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      resources.push({ kind, name: entry.name, source: "user", path: path.join(root, entry.name), status: "active" });
+    }
+  }
+  return resources;
+}
+
 function toRendererMessages(messages) {
   if (!Array.isArray(messages)) return [];
   return messages
@@ -420,6 +437,10 @@ ipcMain.on("pi:command", async (_event, message) => {
       sendToRenderer("session:stats", stats || {});
       return;
     }
+    if (message?.type === "session:resources") {
+      sendToRenderer("session:resources", { resources: scanPiResources(), capabilities: { reload: false, enable: false, disable: false, open: true } });
+      return;
+    }
     if (message?.type === "session:commands") {
       const result = await sendPiCommand({ type: "get_commands" });
       sendToRenderer("session:commands", result?.commands || []);
@@ -464,6 +485,21 @@ ipcMain.on("pi:command", async (_event, message) => {
     if (message?.type === "session:export-html") {
       const result = await sendPiCommand({ type: "export_html", outputPath: payload.outputPath || undefined });
       sendToRenderer("session:exported", result || {});
+      return;
+    }
+    if (message?.type === "session:export-jsonl") {
+      const result = await sendPiCommand({ type: "get_messages" });
+      const outputPath = path.join(currentCwd, `cagent-session-${Date.now()}.jsonl`);
+      const rows = (result?.messages || []).map((item) => JSON.stringify(item)).join("\n");
+      fs.writeFileSync(outputPath, rows ? `${rows}\n` : "", "utf8");
+      sendToRenderer("session:exported", { path: outputPath, format: "jsonl" });
+      return;
+    }
+    if (message?.type === "resource:open") {
+      const target = path.resolve(String(payload?.path || ""));
+      const allowedRoots = [path.join(os.homedir(), ".pi", "agent")].map((root) => path.resolve(root));
+      if (!allowedRoots.some((root) => target === root || target.startsWith(`${root}${path.sep}`))) throw new Error("Resource path is outside the pi agent directory");
+      await shell.openPath(target);
       return;
     }
     if (message?.type === "session:bash") {

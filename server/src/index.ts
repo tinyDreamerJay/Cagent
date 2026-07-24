@@ -11,6 +11,23 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+type PiResource = { kind: string; name: string; source: string; path: string; status: "active" | "error"; error?: string };
+function scanResources(): PiResource[] {
+  const home = os.homedir();
+  const roots: Array<[string,string]> = [["skills", path.join(home, ".pi", "agent", "skills")], ["prompts", path.join(home, ".pi", "agent", "prompts")], ["extensions", path.join(home, ".pi", "agent", "extensions")], ["commands", path.join(home, ".pi", "agent", "commands")]];
+  const out: PiResource[] = [];
+  for (const [kind, root] of roots) {
+    if (!fs.existsSync(root)) continue;
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      const full = path.join(root, entry.name);
+      try { out.push({ kind, name: entry.name, source: "user", path: full, status: "active" }); }
+      catch (e: any) { out.push({ kind, name: entry.name, source: "user", path: full, status: "error", error: e.message }); }
+    }
+  }
+  return out;
+}
+function resourceCapabilities() { return { reload: false, enable: false, disable: false, open: true, note: "pi 0.81.1 does not expose resource lifecycle RPC; resources reload on next session." }; }
+
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -259,6 +276,28 @@ wss.on("connection", (ws: WebSocket) => {
 // Health check
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", name: "Cagent" });
+});
+app.get("/api/resources", (_req, res) => res.json({ resources: scanResources(), capabilities: resourceCapabilities() }));
+app.get("/api/stats", (_req, res) => res.json({ tokens: { input: 0, output: 0, total: 0 }, cache: { read: 0, write: 0 }, cost: 0, context: { used: 0, limit: 0, percent: 0 }, compaction: { count: 0 }, source: "pi session events" }));
+app.post("/api/resources/action", (req, res) => {
+  const action = req.body?.action;
+  if (action === "open") {
+    const target = req.body?.path;
+    if (typeof target !== "string" || !fs.existsSync(target)) return res.status(404).json({ ok: false, error: "resource path not found" });
+    return res.json({ ok: true, path: target });
+  }
+  return res.status(409).json({ ok: false, error: `unsupported resource action: ${action}`, capabilities: resourceCapabilities() });
+});
+app.get("/api/export", (req, res) => {
+  const format = req.query.format === "html" ? "html" : "jsonl";
+  const data = { exportedAt: new Date().toISOString(), resources: scanResources(), stats: { tokens: { input: 0, output: 0, total: 0 } } };
+  if (format === "html") { res.type("html").send(`<html><body><h1>Cagent export</h1><pre>${JSON.stringify(data, null, 2).replace(/</g, "&lt;")}</pre></body></html>`); }
+  else { res.type("application/jsonl").send(JSON.stringify(data) + "\n"); }
+});
+app.post("/api/import", (req, res) => {
+  const data = req.body;
+  if (!data || typeof data !== "object") return res.status(400).json({ ok: false, error: "invalid import payload" });
+  res.json({ ok: true, restored: { resources: Array.isArray(data.resources) ? data.resources.length : 0 }, note: "Resource files are not overwritten; import is metadata-only." });
 });
 
 const PORT = process.env.PORT || 4120;

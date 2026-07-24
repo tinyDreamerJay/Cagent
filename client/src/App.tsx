@@ -5,6 +5,8 @@ import { MessageContent } from "./components/MessageContent";
 import { type Message, type ToolCall } from "./hooks/useConversations";
 import { RuntimeBar, type RuntimeState } from "./components/RuntimeBar";
 import { AgentConsole } from "./components/AgentConsole";
+import { ResourceCenter, type PiResource } from "./components/ResourceCenter";
+import { UsagePanel } from "./components/UsagePanel";
 
 export class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
   constructor(props: any) {
@@ -51,6 +53,7 @@ function App() {
   const [statusMsg, setStatusMsg] = useState("");
   const [stats, setStats] = useState<Record<string, unknown> | null>(null);
   const [commands, setCommands] = useState<{ name: string; description?: string; source: string }[]>([]);
+  const [resources, setResources] = useState<PiResource[]>([]);
   const [commandIndex, setCommandIndex] = useState(0);
   const [exportedPath, setExportedPath] = useState("");
   const [bashOutput, setBashOutput] = useState("");
@@ -123,6 +126,7 @@ function App() {
         setActiveSessionPath(p?.sessionFile || null);
         send("auth:providers");
         send("session:commands");
+        send("session:resources");
       })
     );
 
@@ -154,6 +158,7 @@ function App() {
 
     unsubs.push(subscribe("session:stats", (value: Record<string, unknown>) => setStats(value || null)));
     unsubs.push(subscribe("session:commands", (value: { name: string; description?: string; source: string }[]) => setCommands(Array.isArray(value) ? value : [])));
+    unsubs.push(subscribe("session:resources", (value: { resources?: PiResource[] }) => setResources(Array.isArray(value?.resources) ? value.resources : [])));
     unsubs.push(subscribe("session:exported", (value: { path?: string }) => setExportedPath(value?.path || "")));
     unsubs.push(subscribe("session:bash-result", (value: unknown) => setBashOutput(JSON.stringify(value, null, 2))));
     unsubs.push(subscribe("session:queue", (value: { steering?: string[]; followUp?: string[] }) => setQueuedMessages({ steering: value?.steering || [], followUp: value?.followUp || [] })));
@@ -670,6 +675,10 @@ function App() {
             tree={sessionTree}
             forkMessages={forkMessages}
           />
+          <div className="workspace-panels">
+            <UsagePanel stats={stats} onRefresh={() => send("session:stats")} />
+            <ResourceCenter resources={resources} onReload={() => send("session:resources")} onOpen={(resource) => window.cagent?.pi?.send("resource:open", { path: resource.path })} onExport={(format) => send(format === "html" ? "session:export-html" : "session:export-jsonl", {})} />
+          </div>
         </div>
 
         <div className="messages-container">
