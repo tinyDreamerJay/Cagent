@@ -101,6 +101,10 @@ App
 | `session:clone` | `{}` | 在当前 leaf 克隆会话 |
 | `auth:set-key` | `{ provider, apiKey }` | 更新运行时凭据并重启 pi RPC |
 | `auth:providers` | `{}` | 查询 pi 可用 provider |
+| `auth:status` | `{}` | 查询 provider 凭据来源、配置状态和模型可用性（不含密钥） |
+| `auth:clear` | `{ provider }` | 若 pi 暴露清除 API 则清除，否则返回 `auth:unsupported` |
+| `mcp:list` | `{}` | 发现本地 MCP 配置并报告状态/来源 |
+| `mcp:reconnect` | `{}` | 重新发现 MCP；pi 0.81.1 无 reconnect RPC 时返回 `mcp:unsupported` |
 
 ### pi 事件 → GUI
 

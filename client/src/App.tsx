@@ -45,6 +45,8 @@ function App() {
   const [provider, setProvider] = useState(() => localStorage.getItem("cagent_provider") || "");
   const [availableProviders, setAvailableProviders] = useState<string[]>(["anthropic", "openai", "deepseek"]);
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>({});
+  const [providerStates, setProviderStates] = useState<{ provider: string; configured: boolean; source: string; error?: string }[]>([]);
+  const [mcpServers, setMcpServers] = useState<{ name: string; status: string; source: string; error?: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [initDone, setInitDone] = useState(false);
   const pendingApiKeyRef = useRef<{ key: string; provider: string } | null>(null);
@@ -122,6 +124,8 @@ function App() {
         }
         setActiveSessionPath(p?.sessionFile || null);
         send("auth:providers");
+        send("auth:status");
+        send("mcp:list");
         send("session:commands");
       })
     );
@@ -246,6 +250,8 @@ function App() {
         });
       })
     );
+    unsubs.push(subscribe("auth:status", (p: any[]) => setProviderStates(Array.isArray(p) ? p : [])));
+    unsubs.push(subscribe("mcp:list", (p: any[]) => setMcpServers(Array.isArray(p) ? p : [])));
 
     unsubs.push(
       subscribe("token", (p: { text: string }) => {
@@ -620,6 +626,10 @@ function App() {
         onCwdChange={handleCwdChange}
         mobileOpen={sidebarOpen}
         onMobileClose={closeSidebar}
+        providerStates={providerStates}
+        mcpServers={mcpServers}
+        onClearProvider={(nextProvider) => send("auth:clear", { provider: nextProvider })}
+        onRefreshMcp={() => send("mcp:reconnect")}
       />
       {sidebarOpen && <button className="sidebar-overlay" type="button" aria-label="Close sessions" onClick={closeSidebar} />}
 

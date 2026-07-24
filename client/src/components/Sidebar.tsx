@@ -17,6 +17,10 @@ interface SidebarProps {
   onCwdChange: (cwd: string) => void;
   mobileOpen: boolean;
   onMobileClose: () => void;
+  providerStates?: { provider: string; configured: boolean; source: string; error?: string }[];
+  mcpServers?: { name: string; status: string; source: string; error?: string }[];
+  onClearProvider?: (provider: string) => void;
+  onRefreshMcp?: () => void;
 }
 
 const CagentLogo = () => (
@@ -27,7 +31,7 @@ const CagentLogo = () => (
   </svg>
 );
 
-export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession, onSessionDelete, apiKey, provider, modelsByProvider, selectedModel, onModelSelect, onApiKeySet, availableProviders, cwd, onCwdChange, mobileOpen, onMobileClose }: SidebarProps) {
+export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession, onSessionDelete, apiKey, provider, modelsByProvider, selectedModel, onModelSelect, onApiKeySet, availableProviders, cwd, onCwdChange, mobileOpen, onMobileClose, providerStates = [], mcpServers = [], onClearProvider, onRefreshMcp }: SidebarProps) {
   const [keyInput, setKeyInput] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [selProvider, setSelProvider] = useState(provider || (availableProviders?.[0] || "deepseek"));
@@ -154,8 +158,9 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
             placeholder={`${selProvider === "anthropic" ? "Anthropic" : selProvider === "deepseek" ? "DeepSeek" : "OpenAI"} API Key...`}
           />
           <div className="settings-hint">
-            Press Enter to confirm &middot; Stored locally
+            Enter to save &middot; Secret stays in pi runtime
           </div>
+          {providerStates.find((item) => item.provider === selProvider)?.configured && <button type="button" className="settings-action" onClick={() => onClearProvider?.(selProvider)}>Clear credential</button>}
           <div className="settings-label">
             Working directory
           </div>
@@ -190,6 +195,11 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
           )}
         </div>
       )}
+
+      <div className="sidebar-section">MCP</div>
+      <div className="settings-hint mcp-summary">{mcpServers.length ? `${mcpServers.length} configured server${mcpServers.length > 1 ? "s" : ""}` : "No MCP servers discovered"}</div>
+      {mcpServers.map((server) => <div className="mcp-row" key={server.name}><span>{server.name}</span><small>{server.error || server.status}</small></div>)}
+      <button className="sidebar-item" type="button" onClick={onRefreshMcp}>Refresh MCP discovery</button>
 
       <div className="sidebar-section">Sessions</div>
 
