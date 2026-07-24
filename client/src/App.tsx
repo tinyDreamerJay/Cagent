@@ -36,6 +36,7 @@ function App() {
   const { connected, send, subscribe } = useWebSocket();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [cwd, setCwd] = useState(() => localStorage.getItem("cagent_cwd") || "");
@@ -602,10 +603,13 @@ function App() {
         onApiKeySet={handleApiKeySet}
         cwd={cwd}
         onCwdChange={handleCwdChange}
+        mobileOpen={sidebarOpen}
+        onMobileClose={() => setSidebarOpen(false)}
       />
 
       <main className="main-area">
         <header className="chat-header">
+          <button className="sidebar-toggle" type="button" onClick={() => setSidebarOpen((open) => !open)} aria-label="Toggle sessions">Sessions</button>
           <span className="chat-header-title">
             {!connected ? "Connecting..." :
              !initDone ? "Initializing..." :
@@ -645,23 +649,6 @@ function App() {
         <div className="messages-container">
           {messages.length === 0 ? (
             <div className="welcome">
-              <div className="welcome-icon">
-                <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
-                  <rect width="64" height="64" rx="14" fill="url(#wbg)"/>
-                  <rect x="1" y="1" width="62" height="62" rx="13" fill="none" stroke="#2a2a4a" stroke-width="0.5"/>
-                  <text x="32" y="44" text-anchor="middle" font-family="system-ui" font-weight="700" font-size="40" fill="url(#wtxt)">C</text>
-                  <defs>
-                    <linearGradient id="wbg" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stop-color="#1a1a2e"/>
-                      <stop offset="100%" stop-color="#0f0f1a"/>
-                    </linearGradient>
-                    <linearGradient id="wtxt" x1="0" y1="0" x2="1" y2="1">
-                      <stop offset="0%" stop-color="#7aa2f7"/>
-                      <stop offset="100%" stop-color="#3b82f6"/>
-                    </linearGradient>
-                  </defs>
-                </svg>
-              </div>
               <div className="welcome-title">Cagent</div>
               <div className="welcome-text">
                 A minimalist coding agent. Use your AI to read, write, edit, and debug your project.

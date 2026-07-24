@@ -12,3 +12,5 @@ fix_*.py
 dist/
 release/
 client/dist/
+.playwright-cli/
+output/playwright/

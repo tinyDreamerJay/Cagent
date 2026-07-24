@@ -15,27 +15,19 @@ interface SidebarProps {
   onApiKeySet: (key: string, provider: string) => void;
   cwd: string;
   onCwdChange: (cwd: string) => void;
+  mobileOpen: boolean;
+  onMobileClose: () => void;
 }
 
 const CagentLogo = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-    <rect width="24" height="24" rx="6" fill="url(#sbg)"/>
-    <rect x="0.5" y="0.5" width="23" height="23" rx="5.5" stroke="#2a2a4a" strokeWidth="0.5"/>
-    <text x="12" y="16.5" textAnchor="middle" fontFamily="system-ui" fontWeight="700" fontSize="15" fill="url(#stxt)">C</text>
-    <defs>
-      <linearGradient id="sbg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stopColor="#1a1a2e"/>
-        <stop offset="100%" stopColor="#0f0f1a"/>
-      </linearGradient>
-      <linearGradient id="stxt" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stopColor="#7aa2f7"/>
-        <stop offset="100%" stopColor="#3b82f6"/>
-      </linearGradient>
-    </defs>
+    <rect width="24" height="24" rx="4" fill="#163635"/>
+    <rect x="0.5" y="0.5" width="23" height="23" rx="3.5" stroke="#3a5b56"/>
+    <path d="M16.6 8.1a6.2 6.2 0 1 0 0 7.8" stroke="#8ed1be" strokeWidth="2.3" strokeLinecap="square"/>
   </svg>
 );
 
-export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession, onSessionDelete, apiKey, provider, modelsByProvider, selectedModel, onModelSelect, onApiKeySet, availableProviders, cwd, onCwdChange }: SidebarProps) {
+export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession, onSessionDelete, apiKey, provider, modelsByProvider, selectedModel, onModelSelect, onApiKeySet, availableProviders, cwd, onCwdChange, mobileOpen, onMobileClose }: SidebarProps) {
   const [keyInput, setKeyInput] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [selProvider, setSelProvider] = useState(provider || (availableProviders?.[0] || "deepseek"));
@@ -62,7 +54,7 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
   };
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
       <div className="sidebar-header">
         <div className="sidebar-logo">
           <div className="sidebar-logo-icon">
@@ -94,10 +86,11 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
         </div>
       ) : (
         sessions.map((s) => (
-          <div
+          <button
             key={s.id}
             className={`sidebar-item sidebar-session ${s.id === activeSession ? "active" : ""}`}
-            onClick={() => onSessionSelect(s.id)}
+            onClick={() => { onSessionSelect(s.id); onMobileClose(); }}
+            type="button"
           >
             <span className="dot" />
             <div className="sidebar-session-info">
@@ -116,10 +109,10 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
                 x
               </button>
             )}
-          </div>
+          </button>
         ))
       )}
-      <button className="sidebar-item" onClick={onNewSession}>
+      <button className="sidebar-item" onClick={() => { onNewSession(); onMobileClose(); }}>
         <span className="dot" style={{ background: "var(--success)" }} />
         New session
       </button>
@@ -129,7 +122,7 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
       </button>
 
       {showSettings && (
-        <div style={{ padding: "0 16px 8px" }}>
+        <div className="sidebar-settings">
           <select
             value={selProvider}
             onChange={(e) => {
@@ -140,17 +133,6 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
               if (provModels.length > 0) {
                 onModelSelect(provModels[0]);
               }
-            }}
-            style={{
-              width: "100%",
-              padding: "4px 6px",
-              marginBottom: 6,
-              background: "var(--bg-tertiary)",
-              border: "1px solid var(--border)",
-              borderRadius: "4px",
-              color: "var(--text-primary)",
-              fontSize: "11px",
-              outline: "none",
             }}
           >
             {(availableProviders || ["deepseek"]).map(p => (
@@ -169,25 +151,14 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
               }
             }}
             placeholder={`${selProvider === "anthropic" ? "Anthropic" : selProvider === "deepseek" ? "DeepSeek" : "OpenAI"} API Key...`}
-            style={{
-              width: "100%",
-              padding: "6px 8px",
-              background: "var(--bg-tertiary)",
-              border: "1px solid var(--border)",
-              borderRadius: "4px",
-              color: "var(--text-primary)",
-              fontSize: "12px",
-              fontFamily: "var(--font-mono)",
-              outline: "none",
-            }}
           />
-          <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>
+          <div className="settings-hint">
             Press Enter to confirm &middot; Stored locally
           </div>
-          <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 8, marginBottom: 4 }}>
+          <div className="settings-label">
             Working directory
           </div>
-          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <div className="settings-row">
             <input
               type="text"
               value={cwdInput}
@@ -199,37 +170,16 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
                 }
               }}
               placeholder="C:\\project"
-              style={{
-                flex: 1,
-                padding: "4px 6px",
-                background: "var(--bg-tertiary)",
-                border: "1px solid var(--border)",
-                borderRadius: "4px",
-                color: "var(--text-primary)",
-                fontSize: "11px",
-                fontFamily: "var(--font-mono)",
-                outline: "none",
-              }}
             />
           </div>
           {modelsByProvider[selProvider]?.length > 0 && (
             <>
-              <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 8, marginBottom: 4 }}>
+              <div className="settings-label">
                 Model
               </div>
               <select
                 value={selectedModel}
                 onChange={(e) => onModelSelect(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "4px 6px",
-                  background: "var(--bg-tertiary)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "4px",
-                  color: "var(--text-primary)",
-                  fontSize: "11px",
-                  outline: "none",
-                }}
               >
                 {modelsByProvider[selProvider].map(m => (
                   <option key={m} value={m}>{m}</option>
