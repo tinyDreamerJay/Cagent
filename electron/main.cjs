@@ -30,6 +30,14 @@ const runtimeApiKeys = new Map();
 let restartingPi = false;
 const pendingPiRequests = new Map();
 let pendingGuiMessages = { steering: [], followUp: [] };
+let authRuntime = null;
+async function getAuthRuntime() {
+  if (!authRuntime) {
+    const pi = await import("@earendil-works/pi-coding-agent");
+    authRuntime = await pi.ModelRuntime.create({ allowModelNetwork: false });
+  }
+  return authRuntime;
+}
 
 function rejectPendingPiRequests(error) {
   for (const pending of pendingPiRequests.values()) {
@@ -344,6 +352,19 @@ async function publishRendererAuthState() {
   return availableModels;
 }
 
+async function publishProviderStatus() {
+  const models = await publishRendererAuthState();
+  const ids = [...new Set(models.map((model) => model.provider))];
+  const states = ids.map((provider) => {
+    const providerModels = models.filter((model) => model.provider === provider).map((model) => model.id);
+    const envName = providerEnvName(provider);
+    const configured = runtimeApiKeys.has(provider) || Boolean(process.env[envName]);
+    return { provider, configured, available: providerModels.length > 0, source: runtimeApiKeys.has(provider) ? "runtime" : (process.env[envName] ? "environment" : "pi catalog"), models: providerModels };
+  });
+  sendToRenderer("auth:status", states);
+  return states;
+}
+
 ipcMain.on("pi:command", async (_event, message) => {
   try {
     const payload = message?.payload || {};
@@ -506,12 +527,32 @@ ipcMain.on("pi:command", async (_event, message) => {
       return;
     }
     if (message?.type === "auth:providers") return await initializeRendererSession();
+    if (message?.type === "auth:status") return await publishProviderStatus();
+    if (message?.type === "mcp:list") {
+      sendToRenderer("mcp:list", [{ status: "unsupported", source: "pi 0.81.1", error: "pi 0.81.1 文档明确不包含 built-in MCP，RPC 也无 MCP 事件或工具列表" }]);
+      return;
+    }
+    if (message?.type === "auth:oauth") {
+      const runtime = await getAuthRuntime();
+      sendToRenderer("auth:oauth-status", { status: "starting", provider: payload.provider, message: "正在启动 pi OAuth 登录" });
+      await runtime.login(String(payload.provider), "oauth", { openExternal: (url) => shell.openExternal(url), notify: (message) => sendToRenderer("auth:oauth-status", { status: "progress", provider: payload.provider, message }), prompt: async (message) => { sendToRenderer("auth:oauth-status", { status: "input-required", provider: payload.provider, message }); throw new Error("OAuth prompt requires pi interactive terminal"); } });
+      sendToRenderer("auth:oauth-status", { status: "complete", provider: payload.provider, message: "OAuth 登录完成，凭据已保存到 pi auth store" });
+      await publishProviderStatus();
+      return;
+    }
+    if (message?.type === "auth:clear") {
+      const runtime = await getAuthRuntime();
+      await runtime.removeRuntimeApiKey(String(payload.provider));
+      runtimeApiKeys.delete(String(payload.provider));
+      await publishProviderStatus();
+      return;
+    }
     if (message?.type === "auth:set-key") {
       const provider = String(payload.provider || "").trim();
       const apiKey = String(payload.apiKey || "").trim();
       if (!provider || !apiKey) throw new Error("provider 和 API Key 不能为空");
       if (runtimeApiKeys.get(provider) === apiKey) {
-        const models = await publishRendererAuthState();
+        const models = await publishProviderStatus();
         if (!models.length) sendToRenderer("error", { message: `无法从 ${provider} 获取可用模型，请检查 API Key` });
         return;
       }
@@ -524,7 +565,7 @@ ipcMain.on("pi:command", async (_event, message) => {
       } finally {
         restartingPi = false;
       }
-      const models = await publishRendererAuthState();
+      const models = await publishProviderStatus();
       if (!models.length) sendToRenderer("error", { message: `无法从 ${provider} 获取可用模型，请检查 API Key` });
       return;
     }

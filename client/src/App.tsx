@@ -252,6 +252,7 @@ function App() {
     );
     unsubs.push(subscribe("auth:status", (p: any[]) => setProviderStates(Array.isArray(p) ? p : [])));
     unsubs.push(subscribe("mcp:list", (p: any[]) => setMcpServers(Array.isArray(p) ? p : [])));
+    unsubs.push(subscribe("auth:oauth-status", (p: { message?: string }) => setStatusMsg(p?.message || "")));
 
     unsubs.push(
       subscribe("token", (p: { text: string }) => {
@@ -628,8 +629,7 @@ function App() {
         onMobileClose={closeSidebar}
         providerStates={providerStates}
         mcpServers={mcpServers}
-        onClearProvider={(nextProvider) => send("auth:clear", { provider: nextProvider })}
-        onRefreshMcp={() => send("mcp:reconnect")}
+        onOAuth={(nextProvider) => send("auth:oauth", { provider: nextProvider })}
       />
       {sidebarOpen && <button className="sidebar-overlay" type="button" aria-label="Close sessions" onClick={closeSidebar} />}
 
