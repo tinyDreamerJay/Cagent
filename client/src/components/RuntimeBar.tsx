@@ -3,6 +3,9 @@ export interface RuntimeState {
   sessionName?: string;
   thinkingLevel?: string;
   autoCompactionEnabled?: boolean;
+  autoRetryEnabled?: boolean;
+  steeringMode?: "all" | "one-at-a-time";
+  followUpMode?: "all" | "one-at-a-time";
   messageCount?: number;
   cwd?: string;
 }

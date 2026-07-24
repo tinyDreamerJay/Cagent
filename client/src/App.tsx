@@ -4,6 +4,7 @@ import { useWebSocket } from "./hooks/useWebSocket";
 import { MessageContent } from "./components/MessageContent";
 import { type Message, type ToolCall } from "./hooks/useConversations";
 import { RuntimeBar, type RuntimeState } from "./components/RuntimeBar";
+import { AgentConsole } from "./components/AgentConsole";
 
 export class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
   constructor(props: any) {
@@ -42,6 +43,13 @@ function App() {
   const [initDone, setInitDone] = useState(false);
   const pendingApiKeyRef = useRef<{ key: string; provider: string } | null>(null);
   const [statusMsg, setStatusMsg] = useState("");
+  const [stats, setStats] = useState<Record<string, unknown> | null>(null);
+  const [commands, setCommands] = useState<{ name: string; description?: string; source: string }[]>([]);
+  const [commandIndex, setCommandIndex] = useState(0);
+  const [exportedPath, setExportedPath] = useState("");
+  const [bashOutput, setBashOutput] = useState("");
+  const [extensionRequest, setExtensionRequest] = useState<any>(null);
+  const [extensionValue, setExtensionValue] = useState("");
   const [runtimeState, setRuntimeState] = useState<RuntimeState | null>(null);
   const [thinkingLevels, setThinkingLevels] = useState<string[]>([]);
   const [piSessions, setPiSessions] = useState<{ id: string; path: string; name: string; updatedAt: number }[]>([]);
@@ -81,6 +89,7 @@ function App() {
         }
         setActiveSessionPath(p?.sessionFile || null);
         send("auth:providers");
+        send("session:commands");
       })
     );
 
@@ -109,6 +118,29 @@ function App() {
         setThinkingLevels(Array.isArray(levels) ? levels : []);
       })
     );
+
+    unsubs.push(subscribe("session:stats", (value: Record<string, unknown>) => setStats(value || null)));
+    unsubs.push(subscribe("session:commands", (value: { name: string; description?: string; source: string }[]) => setCommands(Array.isArray(value) ? value : [])));
+    unsubs.push(subscribe("session:exported", (value: { path?: string }) => setExportedPath(value?.path || "")));
+    unsubs.push(subscribe("session:bash-result", (value: unknown) => setBashOutput(JSON.stringify(value, null, 2))));
+    unsubs.push(subscribe("pi:extension-ui", (value: any) => {
+      if (value?.method === "notify") {
+        setStatusMsg(value.message || "");
+        return;
+      }
+      if (value?.method === "setStatus") {
+        setStatusMsg(value.statusText || "");
+        return;
+      }
+      if (value?.method === "setTitle" && value.title) {
+        document.title = value.title;
+        return;
+      }
+      if (value?.id) {
+        setExtensionValue(value.prefill || "");
+        setExtensionRequest(value);
+      }
+    }));
 
     unsubs.push(
       subscribe("auth:providers", (p: string[]) => {
@@ -324,7 +356,42 @@ function App() {
     send("session:prompt", { text, model: selectedModel, provider, cwd: cwd || undefined, images: images.length > 0 ? images : undefined });
   };
 
+  const slashQuery = input.startsWith("/") && !input.slice(1).includes(" ")
+    ? input.slice(1).toLowerCase()
+    : null;
+  const slashMatches = slashQuery === null
+    ? []
+    : commands.filter((command) => command.name.toLowerCase().includes(slashQuery)).slice(0, 10);
+
+  const selectSlashCommand = (name: string) => {
+    setInput(`/${name} `);
+    setCommandIndex(0);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (slashMatches.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setCommandIndex((current) => (current + 1) % slashMatches.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setCommandIndex((current) => (current - 1 + slashMatches.length) % slashMatches.length);
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && slashQuery !== null)) {
+        e.preventDefault();
+        selectSlashCommand(slashMatches[Math.min(commandIndex, slashMatches.length - 1)].name);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setInput("");
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -426,9 +493,43 @@ function App() {
     }
   };
 
+  const respondToExtension = (confirmed?: boolean, cancelled?: boolean) => {
+    if (!extensionRequest) return;
+    const payload: Record<string, unknown> = { id: extensionRequest.id };
+    if (cancelled) payload.cancelled = true;
+    else if (extensionRequest.method === "confirm") payload.confirmed = Boolean(confirmed);
+    else payload.value = extensionValue;
+    send("extension:respond", payload);
+    setExtensionRequest(null);
+    setExtensionValue("");
+  };
+
   return (
     <ErrorBoundary>
     <div className="app-container">
+      {extensionRequest && (
+        <div className="extension-overlay" role="dialog" aria-modal="true" aria-label={extensionRequest.title || "Extension request"}>
+          <div className="extension-dialog">
+            <h2>{extensionRequest.title || "Extension request"}</h2>
+            {extensionRequest.message && <p>{extensionRequest.message}</p>}
+            {extensionRequest.method === "select" && (
+              <select value={extensionValue} onChange={(event) => setExtensionValue(event.target.value)}>
+                <option value="">Select an option</option>
+                {(extensionRequest.options || []).map((option: string) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            )}
+            {(extensionRequest.method === "input" || extensionRequest.method === "editor") && (
+              extensionRequest.method === "editor"
+                ? <textarea value={extensionValue} onChange={(event) => setExtensionValue(event.target.value)} placeholder={extensionRequest.placeholder || ""} rows={8} />
+                : <input autoFocus value={extensionValue} onChange={(event) => setExtensionValue(event.target.value)} placeholder={extensionRequest.placeholder || ""} />
+            )}
+            <div className="extension-dialog-actions">
+              <button type="button" onClick={() => respondToExtension(undefined, true)}>Cancel</button>
+              {extensionRequest.method === "confirm" ? <><button type="button" onClick={() => respondToExtension(false)}>No</button><button type="button" onClick={() => respondToExtension(true)}>Yes</button></> : <button type="button" onClick={() => respondToExtension()}>Continue</button>}
+            </div>
+          </div>
+        </div>
+      )}
       <Sidebar
         sessions={piSessions.map(session => ({
           id: session.path,
@@ -472,6 +573,17 @@ function App() {
           onAutoCompactionChange={(enabled) => send("session:set-auto-compaction", { enabled })}
           onCompact={() => send("session:compact")}
         />
+        <div className="agent-console-anchor">
+          <AgentConsole
+            state={runtimeState}
+            disabled={!initDone || sending}
+            onCommand={send}
+            commands={commands}
+            stats={stats}
+            exportedPath={exportedPath}
+            bashOutput={bashOutput}
+          />
+        </div>
 
         <div className="messages-container">
           {messages.length === 0 ? (
@@ -582,11 +694,30 @@ function App() {
               </div>
             </div>
           )}
+          {slashMatches.length > 0 && (
+            <div className="slash-palette" role="listbox" aria-label="Pi commands">
+              {slashMatches.map((command, index) => (
+                <button
+                  key={`${command.source}-${command.name}`}
+                  type="button"
+                  className={index === commandIndex ? "active" : ""}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectSlashCommand(command.name)}
+                  role="option"
+                  aria-selected={index === commandIndex}
+                >
+                  <span className="slash-command-name">/{command.name}</span>
+                  <span className="slash-command-description">{command.description || command.source}</span>
+                  <span className="slash-command-source">{command.source}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="input-wrapper">
             <textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => { setInput(e.target.value); setCommandIndex(0); }}
               onKeyDown={handleKeyDown}
               placeholder={sending ? "Stop..." : "Ask anything..."}
               rows={1}

@@ -348,6 +348,12 @@ ipcMain.on("pi:command", async (_event, message) => {
       }
       return await sendPiCommand({ type: "prompt", message: payload.text || "", images: payload.images });
     }
+    if (message?.type === "session:steer") {
+      return await sendPiCommand({ type: "steer", message: payload.text || "", images: payload.images });
+    }
+    if (message?.type === "session:follow-up") {
+      return await sendPiCommand({ type: "follow_up", message: payload.text || "", images: payload.images });
+    }
     if (message?.type === "session:abort") return await sendPiCommand({ type: "abort" });
     if (message?.type === "session:new") {
       const result = await sendPiCommand({ type: "new_session" });
@@ -361,6 +367,22 @@ ipcMain.on("pi:command", async (_event, message) => {
     }
     if (message?.type === "session:set-auto-compaction") {
       await sendPiCommand({ type: "set_auto_compaction", enabled: Boolean(payload.enabled) });
+      await publishSessionState();
+      return;
+    }
+    if (message?.type === "session:set-auto-retry") {
+      await sendPiCommand({ type: "set_auto_retry", enabled: Boolean(payload.enabled) });
+      await publishSessionState();
+      return;
+    }
+    if (message?.type === "session:abort-retry") return await sendPiCommand({ type: "abort_retry" });
+    if (message?.type === "session:set-steering-mode") {
+      await sendPiCommand({ type: "set_steering_mode", mode: payload.mode });
+      await publishSessionState();
+      return;
+    }
+    if (message?.type === "session:set-follow-up-mode") {
+      await sendPiCommand({ type: "set_follow_up_mode", mode: payload.mode });
       await publishSessionState();
       return;
     }
@@ -378,6 +400,50 @@ ipcMain.on("pi:command", async (_event, message) => {
       const stats = await sendPiCommand({ type: "get_session_stats" });
       sendToRenderer("session:stats", stats || {});
       return;
+    }
+    if (message?.type === "session:commands") {
+      const result = await sendPiCommand({ type: "get_commands" });
+      sendToRenderer("session:commands", result?.commands || []);
+      return;
+    }
+    if (message?.type === "session:tree") {
+      const result = await sendPiCommand({ type: "get_tree" });
+      sendToRenderer("session:tree", result || { tree: [], leafId: null });
+      return;
+    }
+    if (message?.type === "session:entries") {
+      const result = await sendPiCommand({ type: "get_entries", since: payload.since });
+      sendToRenderer("session:entries", result || { entries: [], leafId: null });
+      return;
+    }
+    if (message?.type === "session:fork") {
+      const result = await sendPiCommand({ type: "fork", entryId: payload.entryId });
+      if (!result?.cancelled) await initializeRendererSession();
+      return;
+    }
+    if (message?.type === "session:clone") {
+      const result = await sendPiCommand({ type: "clone" });
+      if (!result?.cancelled) await initializeRendererSession();
+      return;
+    }
+    if (message?.type === "session:set-name") {
+      await sendPiCommand({ type: "set_session_name", name: String(payload.name || "") });
+      await initializeRendererSession();
+      return;
+    }
+    if (message?.type === "session:export-html") {
+      const result = await sendPiCommand({ type: "export_html", outputPath: payload.outputPath || undefined });
+      sendToRenderer("session:exported", result || {});
+      return;
+    }
+    if (message?.type === "session:bash") {
+      const result = await sendPiCommand({ type: "bash", command: String(payload.command || ""), excludeFromContext: Boolean(payload.excludeFromContext) });
+      sendToRenderer("session:bash-result", result || {});
+      return;
+    }
+    if (message?.type === "session:abort-bash") return await sendPiCommand({ type: "abort_bash" });
+    if (message?.type === "extension:respond") {
+      return await sendPiCommand({ type: "extension_ui_response", ...payload });
     }
     if (message?.type === "session:set-cwd") {
       const newCwd = String(payload.cwd || "").trim();
