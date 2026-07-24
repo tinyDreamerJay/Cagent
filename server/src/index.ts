@@ -6,7 +6,6 @@ import path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
 import { CagentSession } from "./session.js";
-import { discoverMcp, providerStates } from "./management.js";
 
 const app = express();
 app.use(cors());
@@ -240,38 +239,6 @@ wss.on("connection", (ws: WebSocket) => {
           }
           break;
         }
-
-        case "auth:status": {
-          if (!modelRuntime) await initSession();
-          const states = providerStates(modelRuntime);
-          for (const state of states) {
-            try { state.models = (await modelRuntime.getAvailable(state.provider)).map((m: any) => m.id); }
-            catch (err: any) { state.error = err?.message || "provider unavailable"; }
-          }
-          ws.send(JSON.stringify({ type: "auth:status", payload: states }));
-          break;
-        }
-
-        case "auth:clear": {
-          const provider = String(payload?.provider || "");
-          if (!modelRuntime || !provider) throw new Error("provider 不能为空");
-          if (typeof modelRuntime.clearRuntimeApiKey !== "function") {
-            ws.send(JSON.stringify({ type: "auth:unsupported", payload: { provider, action: "clear", reason: "pi 0.81.1 未提供 clearRuntimeApiKey RPC" } }));
-            break;
-          }
-          await modelRuntime.clearRuntimeApiKey(provider);
-          ws.send(JSON.stringify({ type: "auth:cleared", payload: { provider } }));
-          break;
-        }
-
-        case "mcp:list":
-          ws.send(JSON.stringify({ type: "mcp:list", payload: discoverMcp() }));
-          break;
-
-        case "mcp:reconnect":
-          ws.send(JSON.stringify({ type: "mcp:unsupported", payload: { reason: "pi 0.81.1 未导出 MCP reconnect RPC，已刷新本地配置发现" } }));
-          ws.send(JSON.stringify({ type: "mcp:list", payload: discoverMcp() }));
-          break;
 
         default:
           ws.send(JSON.stringify({ type: "error", payload: { message: `鏈煡娑堟伅绫诲瀷: ${type}` } }));

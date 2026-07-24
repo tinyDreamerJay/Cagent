@@ -16,17 +16,6 @@ app.use(express.json());
 const httpServer = createHttpServer(app);
 const wss = new WebSocketServer({ server: httpServer });
 
-function discoverMcp() {
-  for (const file of [path.join(os.homedir(), ".pi", "agent", "mcp.json"), path.join(os.homedir(), ".pi", "agent", "settings.json")]) {
-    try {
-      const value = JSON.parse(fs.readFileSync(file, "utf8"));
-      const servers = value.mcpServers || value.mcp || {};
-      return Object.entries(servers).map(([name, cfg]) => ({ name, source: file, status: "configured", tools: [], error: cfg?.command ? undefined : "pi 0.81.1 未提供 MCP RPC" }));
-    } catch { /* no local config */ }
-  }
-  return [];
-}
-
 // Lazy load pi SDK (ESM-only)
 let piSDK = null;
 async function getPiSDK() {
@@ -426,29 +415,6 @@ wss.on("connection", (ws) => {
           }
           break;
         }
-
-        case "auth:status": {
-          const states = getProviderIds(modelRuntime).map((provider) => {
-            const status = modelRuntime.getProviderAuthStatus?.(provider);
-            return { provider, configured: Boolean(status?.configured), source: status?.source || "pi", models: [] };
-          });
-          for (const state of states) { try { state.models = (await modelRuntime.getAvailable(state.provider)).map(m => m.id); } catch (err) { state.error = err.message; } }
-          ws.send(JSON.stringify({ type: "auth:status", payload: states }));
-          break;
-        }
-
-        case "auth:clear":
-          ws.send(JSON.stringify({ type: "auth:unsupported", payload: { provider: payload?.provider, action: "clear", reason: "pi 0.81.1 未提供 clearRuntimeApiKey RPC" } }));
-          break;
-
-        case "mcp:list":
-          ws.send(JSON.stringify({ type: "mcp:list", payload: discoverMcp() }));
-          break;
-
-        case "mcp:reconnect":
-          ws.send(JSON.stringify({ type: "mcp:unsupported", payload: { reason: "pi 0.81.1 未导出 MCP reconnect RPC" } }));
-          ws.send(JSON.stringify({ type: "mcp:list", payload: discoverMcp() }));
-          break;
 
         case "session:list": {
           ws.send(JSON.stringify({ type: "session:list", payload: [] }));

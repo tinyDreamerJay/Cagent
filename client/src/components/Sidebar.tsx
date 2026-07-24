@@ -12,7 +12,7 @@ interface SidebarProps {
   modelsByProvider: Record<string, string[]>;
   selectedModel: string;
   onModelSelect: (model: string) => void;
-  onApiKeySet: (key: string, provider: string) => void;
+  onApiKeySet: (key: string, provider: string, mode: "stored" | "session") => void;
   cwd: string;
   onCwdChange: (cwd: string) => void;
   mobileOpen: boolean;
@@ -20,6 +20,7 @@ interface SidebarProps {
   providerStates?: { provider: string; configured: boolean; available: boolean; source: string; models: string[]; capabilities: { apiKey: boolean; oauth: boolean }; error?: string }[];
   mcpServers?: { status: string; source: string; error?: string }[];
   onOAuth?: (provider: string) => void;
+  onClear?: (provider: string) => void;
 }
 
 const CagentLogo = () => (
@@ -30,8 +31,9 @@ const CagentLogo = () => (
   </svg>
 );
 
-export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession, onSessionDelete, apiKey, provider, modelsByProvider, selectedModel, onModelSelect, onApiKeySet, availableProviders, cwd, onCwdChange, mobileOpen, onMobileClose, providerStates = [], mcpServers = [], onOAuth }: SidebarProps) {
+export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession, onSessionDelete, apiKey, provider, modelsByProvider, selectedModel, onModelSelect, onApiKeySet, availableProviders, cwd, onCwdChange, mobileOpen, onMobileClose, providerStates = [], mcpServers = [], onOAuth, onClear }: SidebarProps) {
   const [keyInput, setKeyInput] = useState("");
+  const [keyMode, setKeyMode] = useState<"stored" | "session">("stored");
   const [showSettings, setShowSettings] = useState(false);
   const [selProvider, setSelProvider] = useState(provider || (availableProviders?.[0] || "deepseek"));
   const [cwdInput, setCwdInput] = useState(cwd);
@@ -149,7 +151,7 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
             onChange={(e) => setKeyInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
-                onApiKeySet(keyInput.trim(), selProvider);
+                onApiKeySet(keyInput.trim(), selProvider, keyMode);
                 setKeyInput("");
                 setShowSettings(false);
               }
@@ -159,7 +161,9 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
           <div className="settings-hint">
             Enter to save &middot; Secret stays in pi runtime
           </div>
+          <select value={keyMode} onChange={(event) => setKeyMode(event.target.value as "stored" | "session")}><option value="stored">Save to pi</option><option value="session">Session only</option></select>
           {providerStates.find((item) => item.provider === selProvider)?.capabilities?.oauth && <button type="button" className="settings-action" onClick={() => onOAuth?.(selProvider)}>Sign in with OAuth</button>}
+          {providerStates.find((item) => item.provider === selProvider)?.configured && <button type="button" className="settings-action" onClick={() => window.confirm("Remove this credential from pi?") && onClear?.(selProvider)}>Remove credential</button>}
           <div className="settings-label">
             Working directory
           </div>

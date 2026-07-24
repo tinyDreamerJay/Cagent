@@ -4,6 +4,7 @@ const os = require("os");
 const path = require("path");
 const { pathToFileURL } = require("url");
 const { spawn } = require("child_process");
+const { mergeProviderStates, openAuthUrl } = require("./auth-management.cjs");
 
 // Suppress EPIPE errors when running with piped stdio
 process.stdout.on("error", () => {});
@@ -365,8 +366,9 @@ async function publishProviderStatus() {
     const configured = stored.has(provider) || runtimeApiKeys.has(provider) || Boolean(process.env[envName]);
     return { provider, configured, available: providerModels.length > 0, source: stored.has(provider) ? `stored:${stored.get(provider)}` : (runtimeApiKeys.has(provider) ? "runtime" : (process.env[envName] ? "environment" : "catalog")), capabilities: { apiKey: Boolean(auth.apiKey), oauth: Boolean(auth.oauth) }, models: providerModels };
   });
-  sendToRenderer("auth:status", states);
-  return states;
+  const merged = mergeProviderStates(runtime.getProviders(), models, stored, runtimeApiKeys, new Set());
+  sendToRenderer("auth:status", merged);
+  return merged;
 }
 
 ipcMain.on("pi:command", async (_event, message) => {
@@ -539,7 +541,7 @@ ipcMain.on("pi:command", async (_event, message) => {
     if (message?.type === "auth:oauth") {
       const runtime = await getAuthRuntime();
       sendToRenderer("auth:oauth-status", { status: "starting", provider: payload.provider, message: "正在启动 pi OAuth 登录" });
-      await runtime.login(String(payload.provider), "oauth", { notify: (event) => { if (event.type === "auth_url") { if (!/^https?:\/\//i.test(event.url)) throw new Error("OAuth URL scheme rejected"); shell.openExternal(event.url); } if (event.type === "device_code" && /^https?:\/\//i.test(event.verificationUri)) shell.openExternal(event.verificationUri); sendToRenderer("auth:oauth-event", { provider: payload.provider, event }); }, prompt: (prompt) => new Promise((resolve, reject) => { const id = `auth-${Date.now()}-${Math.random()}`; authPrompts.set(id, { resolve, reject }); sendToRenderer("auth:oauth-prompt", { id, provider: payload.provider, prompt }); }) });
+      await runtime.login(String(payload.provider), "oauth", { notify: (event) => { if (event.type === "auth_url" || event.type === "device_code") openAuthUrl(event, shell.openExternal); sendToRenderer("auth:oauth-event", { provider: payload.provider, event }); }, prompt: (prompt) => new Promise((resolve, reject) => { const id = `auth-${Date.now()}-${Math.random()}`; authPrompts.set(id, { resolve, reject }); sendToRenderer("auth:oauth-prompt", { id, provider: payload.provider, prompt }); }) });
       sendToRenderer("auth:oauth-status", { status: "complete", provider: payload.provider, message: "OAuth 登录完成，凭据已保存到 pi auth store" });
       restartingPi = true;
       try { stopPiRpc(); await startPiRpc(); await initializeRendererSession(); } finally { restartingPi = false; }
@@ -560,6 +562,10 @@ ipcMain.on("pi:command", async (_event, message) => {
       const provider = String(payload.provider || "").trim();
       const apiKey = String(payload.apiKey || "").trim();
       if (!provider || !apiKey) throw new Error("provider 和 API Key 不能为空");
+      if (payload.mode === "stored") {
+        const runtime = await getAuthRuntime();
+        await runtime.login(provider, "api_key", { prompt: async () => apiKey, notify: (event) => sendToRenderer("auth:oauth-event", { provider, event }) });
+      }
       if (runtimeApiKeys.get(provider) === apiKey) {
         const models = await publishProviderStatus();
         if (!models.length) sendToRenderer("error", { message: `无法从 ${provider} 获取可用模型，请检查 API Key` });

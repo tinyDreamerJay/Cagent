@@ -1,0 +1,12 @@
+const assert = require("node:assert/strict");
+const { mergeProviderStates, openAuthUrl } = require("../electron/auth-management.cjs");
+const states = mergeProviderStates([{ id: "oauth-only", auth: { oauth: {} } }], [{ provider: "extension", id: "m1" }], new Map([["oauth-only", "oauth"]]), new Map(), new Set());
+assert.deepEqual(states.map((s) => s.provider), ["oauth-only", "extension"]);
+assert.equal(JSON.stringify(states).includes("secret"), false);
+let opened = "";
+openAuthUrl({ type: "auth_url", url: "https://example.test/login" }, (url) => { opened = url; });
+assert.equal(opened, "https://example.test/login");
+assert.throws(() => openAuthUrl({ type: "auth_url", url: "file:///secret" }, () => {}));
+const seen = new Set(["prompt-1"]);
+assert.equal(seen.has("prompt-1"), true);
+console.log("auth-management fixture ok");

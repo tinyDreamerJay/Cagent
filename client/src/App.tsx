@@ -518,7 +518,7 @@ function App() {
     });
   };
 
-  const handleApiKeySet = (key: string, prov: string) => {
+  const handleApiKeySet = (key: string, prov: string, mode: "stored" | "session" = "stored") => {
     if (!key) return;
     localStorage.removeItem("cagent_apikey");
     localStorage.setItem("cagent_provider", prov);
@@ -526,7 +526,7 @@ function App() {
     setModelsByProvider({});
     setSelectedModel("");
     if (initDone) {
-      send("auth:set-key", { provider: prov, apiKey: key });
+      send("auth:set-key", { provider: prov, apiKey: key, mode });
     } else {
       pendingApiKeyRef.current = { key, provider: prov };
     }
@@ -637,6 +637,7 @@ function App() {
         providerStates={providerStates}
         mcpServers={mcpServers}
         onOAuth={(nextProvider) => send("auth:oauth", { provider: nextProvider })}
+        onClear={(nextProvider) => send("auth:clear", { provider: nextProvider })}
       />
       {sidebarOpen && <button className="sidebar-overlay" type="button" aria-label="Close sessions" onClick={closeSidebar} />}
 
