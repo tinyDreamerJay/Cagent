@@ -31,6 +31,7 @@ let restartingPi = false;
 const pendingPiRequests = new Map();
 let pendingGuiMessages = { steering: [], followUp: [] };
 let authRuntime = null;
+const authPrompts = new Map();
 async function getAuthRuntime() {
   if (!authRuntime) {
     const pi = await import("@earendil-works/pi-coding-agent");
@@ -535,11 +536,12 @@ ipcMain.on("pi:command", async (_event, message) => {
     if (message?.type === "auth:oauth") {
       const runtime = await getAuthRuntime();
       sendToRenderer("auth:oauth-status", { status: "starting", provider: payload.provider, message: "正在启动 pi OAuth 登录" });
-      await runtime.login(String(payload.provider), "oauth", { openExternal: (url) => shell.openExternal(url), notify: (message) => sendToRenderer("auth:oauth-status", { status: "progress", provider: payload.provider, message }), prompt: async (message) => { sendToRenderer("auth:oauth-status", { status: "input-required", provider: payload.provider, message }); throw new Error("OAuth prompt requires pi interactive terminal"); } });
+      await runtime.login(String(payload.provider), "oauth", { openExternal: (url) => { if (!/^https?:\/\//i.test(url)) throw new Error("OAuth URL scheme rejected"); return shell.openExternal(url); }, notify: (event) => sendToRenderer("auth:oauth-event", { provider: payload.provider, event }), prompt: (prompt) => new Promise((resolve, reject) => { const id = `auth-${Date.now()}-${Math.random()}`; authPrompts.set(id, { resolve, reject }); sendToRenderer("auth:oauth-prompt", { id, provider: payload.provider, prompt }); }) });
       sendToRenderer("auth:oauth-status", { status: "complete", provider: payload.provider, message: "OAuth 登录完成，凭据已保存到 pi auth store" });
       await publishProviderStatus();
       return;
     }
+    if (message?.type === "auth:prompt-response") { const pending = authPrompts.get(payload.id); if (pending) { authPrompts.delete(payload.id); if (payload.cancelled) pending.reject(new Error("Authentication cancelled")); else pending.resolve(String(payload.value || "")); } return; }
     if (message?.type === "auth:clear") {
       const runtime = await getAuthRuntime();
       await runtime.removeRuntimeApiKey(String(payload.provider));

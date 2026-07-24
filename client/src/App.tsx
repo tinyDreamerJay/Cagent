@@ -58,6 +58,8 @@ function App() {
   const [bashOutput, setBashOutput] = useState("");
   const [extensionRequest, setExtensionRequest] = useState<any>(null);
   const [extensionValue, setExtensionValue] = useState("");
+  const [authPrompt, setAuthPrompt] = useState<any>(null);
+  const [authPromptValue, setAuthPromptValue] = useState("");
   const [extensionWidgets, setExtensionWidgets] = useState<Record<string, { lines: string[]; placement: "aboveEditor" | "belowEditor" }>>({});
   const [queuedMessages, setQueuedMessages] = useState({ steering: [] as string[], followUp: [] as string[] });
   const [sessionTree, setSessionTree] = useState<any[]>([]);
@@ -249,6 +251,8 @@ function App() {
     unsubs.push(subscribe("auth:status", (p: any[]) => setProviderStates(Array.isArray(p) ? p : [])));
     unsubs.push(subscribe("mcp:list", (p: any[]) => setMcpServers(Array.isArray(p) ? p : [])));
     unsubs.push(subscribe("auth:oauth-status", (p: { message?: string }) => setStatusMsg(p?.message || "")));
+    unsubs.push(subscribe("auth:oauth-event", (p: any) => setStatusMsg(p?.event?.message || p?.event?.instructions || "OAuth in progress")));
+    unsubs.push(subscribe("auth:oauth-prompt", (p: any) => { setAuthPrompt(p); setAuthPromptValue(""); }));
 
     unsubs.push(
       subscribe("token", (p: { text: string }) => {
@@ -528,6 +532,12 @@ function App() {
     }
   };
 
+  const respondToAuthPrompt = (cancelled = false) => {
+    if (!authPrompt) return;
+    send("auth:prompt-response", { id: authPrompt.id, value: authPromptValue, cancelled });
+    setAuthPrompt(null);
+  };
+
   const handleCwdChange = (newCwd: string) => {
     if (!newCwd) return;
     const normalized = newCwd.replace(/\\/g, "/");
@@ -603,6 +613,7 @@ function App() {
           </div>
         </div>
       )}
+      {authPrompt && <div className="extension-overlay" role="dialog" aria-modal="true" aria-label="Pi authentication"><div className="extension-dialog"><h2>Pi authentication</h2><p>{authPrompt.prompt?.message}</p><input autoFocus type={authPrompt.prompt?.type === "secret" ? "password" : "text"} value={authPromptValue} onChange={(event) => setAuthPromptValue(event.target.value)} placeholder={authPrompt.prompt?.placeholder || ""} /><div className="extension-dialog-actions"><button type="button" onClick={() => respondToAuthPrompt(true)}>Cancel</button><button type="button" onClick={() => respondToAuthPrompt(false)}>Continue</button></div></div></div>}
       <Sidebar
         sessions={piSessions.map(session => ({
           id: session.path,
