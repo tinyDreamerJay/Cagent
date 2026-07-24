@@ -26,6 +26,12 @@
 
 - API Key 仅在本地存储，不上传到任何第三方
 - 目前只支持 Anthropic provider（`"anthropic"`）
+
+## Provider/Auth 与 MCP 管理
+
+- renderer 只接收 provider 的 `configured`、`source`、模型列表和错误摘要，不接收 API Key；密钥由 pi runtime 保留在服务端内存/既有 credential store 中。
+- `auth:set-key` 使用 pi 0.81.1 的 `ModelRuntime.setRuntimeApiKey`。该版本未导出 `clearRuntimeApiKey` 或 OAuth RPC，因此界面会明确报告清除/OAuth 不可用，不伪造成功状态。
+- MCP 仅发现 `~/.pi/agent/mcp.json` 或 `settings.json` 中的配置并展示来源；pi 0.81.1 未导出 MCP reconnect/list RPC，刷新操作只重新读取配置并标记能力边界。
 - 如果初始化尚未完成就设置 Key，前端将 Key 排队，等 `session:ready` 后自动发送
 - 没有 API Key 时，输入框禁用，无法发送消息
 

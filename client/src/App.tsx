@@ -9,6 +9,8 @@ import { WorkspacePanel } from "./components/WorkspacePanel";
 import { ResourceCenter, type PiResource } from "./components/ResourceCenter";
 import { UsagePanel } from "./components/UsagePanel";
 
+interface ProviderState { provider: string; configured: boolean; available: boolean; source: string; models: string[]; capabilities: { apiKey: boolean; oauth: boolean }; error?: string }
+
 export class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
   constructor(props: any) {
     super(props);
@@ -44,13 +46,15 @@ function App() {
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [cwd, setCwd] = useState(() => localStorage.getItem("cagent_cwd") || "");
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("cagent_apikey") || "");
   const [provider, setProvider] = useState(() => localStorage.getItem("cagent_provider") || "");
   const [availableProviders, setAvailableProviders] = useState<string[]>(["anthropic", "openai", "deepseek"]);
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>({});
+  const [providerStates, setProviderStates] = useState<ProviderState[]>([]);
+  const credentialReady = Boolean(providerStates.find((item) => item.provider === provider)?.configured && modelsByProvider[provider]?.length);
+  const [mcpServers, setMcpServers] = useState<{ status: string; source: string; error?: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [initDone, setInitDone] = useState(false);
-  const pendingApiKeyRef = useRef<{ key: string; provider: string } | null>(null);
+  const pendingApiKeyRef = useRef<{ key: string; provider: string; mode: "stored" | "session" } | null>(null);
   const [statusMsg, setStatusMsg] = useState("");
   const [stats, setStats] = useState<Record<string, unknown> | null>(null);
   const [commands, setCommands] = useState<{ name: string; description?: string; source: string }[]>([]);
@@ -62,6 +66,8 @@ function App() {
   const [bashOutput, setBashOutput] = useState("");
   const [extensionRequest, setExtensionRequest] = useState<any>(null);
   const [extensionValue, setExtensionValue] = useState("");
+  const [authPrompt, setAuthPrompt] = useState<any>(null);
+  const [authPromptValue, setAuthPromptValue] = useState("");
   const [extensionWidgets, setExtensionWidgets] = useState<Record<string, { lines: string[]; placement: "aboveEditor" | "belowEditor" }>>({});
   const [queuedMessages, setQueuedMessages] = useState({ steering: [] as string[], followUp: [] as string[] });
   const [sessionTree, setSessionTree] = useState<any[]>([]);
@@ -128,6 +134,8 @@ function App() {
         }
         setActiveSessionPath(p?.sessionFile || null);
         send("auth:providers");
+        send("auth:status");
+        send("mcp:list");
         send("session:commands");
         setResourcesLoading(true); setResourcesError(""); send("session:resources");
       })
@@ -213,22 +221,17 @@ function App() {
         if (pending) {
           pendingApiKeyRef.current = null;
           if (p.includes(pending.provider)) {
-            send("auth:set-key", { provider: pending.provider, apiKey: pending.key });
+            send("auth:set-key", { provider: pending.provider, apiKey: pending.key, mode: pending.mode });
           }
         } else {
-          const savedKey = localStorage.getItem("cagent_apikey");
           const finalProvider = p.includes(savedProvider || "") ? savedProvider! : p[0];
-          if (savedKey && finalProvider) {
-            setProvider(finalProvider);
-            send("auth:set-key", { provider: finalProvider, apiKey: savedKey });
-          }
+          if (finalProvider) setProvider(finalProvider);
         }
       })
     );
 
     unsubs.push(
       subscribe("auth:key-ready", (p: { provider: string; models?: string[]; source?: string }) => {
-        setApiKey((prev) => prev || "__environment_credential__");
         setModelsByProvider((prev) => {
           const updated = { ...prev };
           if (p.models && p.models.length > 0) {
@@ -254,6 +257,11 @@ function App() {
         });
       })
     );
+    unsubs.push(subscribe("auth:status", (p: ProviderState[]) => { const states = Array.isArray(p) ? p : []; setProviderStates(states); setAvailableProviders(states.map((item) => item.provider)); setModelsByProvider(Object.fromEntries(states.filter((item) => item.models?.length).map((item) => [item.provider, item.models]))); }));
+    unsubs.push(subscribe("mcp:list", (p: any[]) => setMcpServers(Array.isArray(p) ? p : [])));
+    unsubs.push(subscribe("auth:oauth-status", (p: { message?: string }) => setStatusMsg(p?.message || "")));
+    unsubs.push(subscribe("auth:oauth-event", (p: any) => setStatusMsg(p?.event?.message || p?.event?.instructions || "OAuth in progress")));
+    unsubs.push(subscribe("auth:oauth-prompt", (p: any) => { setAuthPrompt(p); setAuthPromptValue(""); }));
 
     unsubs.push(
       subscribe("token", (p: { text: string }) => {
@@ -518,19 +526,24 @@ function App() {
     });
   };
 
-  const handleApiKeySet = (key: string, prov: string) => {
+  const handleApiKeySet = (key: string, prov: string, mode: "stored" | "session" = "stored") => {
     if (!key) return;
-    localStorage.setItem("cagent_apikey", key);
+    localStorage.removeItem("cagent_apikey");
     localStorage.setItem("cagent_provider", prov);
-    setApiKey(key);
     setProvider(prov);
     setModelsByProvider({});
     setSelectedModel("");
     if (initDone) {
-      send("auth:set-key", { provider: prov, apiKey: key });
+      send("auth:set-key", { provider: prov, apiKey: key, mode });
     } else {
-      pendingApiKeyRef.current = { key, provider: prov };
+      pendingApiKeyRef.current = { key, provider: prov, mode };
     }
+  };
+
+  const respondToAuthPrompt = (cancelled = false) => {
+    if (!authPrompt) return;
+    send("auth:prompt-response", { id: authPrompt.id, value: authPromptValue, cancelled });
+    setAuthPrompt(null);
   };
 
   const handleCwdChange = (newCwd: string) => {
@@ -609,6 +622,7 @@ function App() {
           </div>
         </div>
       )}
+      {authPrompt && <div className="extension-overlay" role="dialog" aria-modal="true" aria-label="Pi authentication"><div className="extension-dialog"><h2>Pi authentication</h2><p>{authPrompt.prompt?.message}</p><input autoFocus type={authPrompt.prompt?.type === "secret" ? "password" : "text"} value={authPromptValue} onChange={(event) => setAuthPromptValue(event.target.value)} placeholder={authPrompt.prompt?.placeholder || ""} /><div className="extension-dialog-actions"><button type="button" onClick={() => respondToAuthPrompt(true)}>Cancel</button><button type="button" onClick={() => respondToAuthPrompt(false)}>Continue</button></div></div></div>}
       <Sidebar
         sessions={piSessions.map(session => ({
           id: session.path,
@@ -618,7 +632,7 @@ function App() {
         activeSession={activeSessionPath}
         onSessionSelect={handleSessionSelect}
         onNewSession={handleNewSession}
-        apiKey={apiKey}
+        apiKey={credentialReady ? "ready" : ""}
         provider={provider}
         availableProviders={availableProviders}
         modelsByProvider={modelsByProvider}
@@ -629,6 +643,10 @@ function App() {
         onCwdChange={handleCwdChange}
         mobileOpen={sidebarOpen}
         onMobileClose={closeSidebar}
+        providerStates={providerStates}
+        mcpServers={mcpServers}
+        onOAuth={(nextProvider) => send("auth:oauth", { provider: nextProvider })}
+        onClear={(nextProvider) => send("auth:clear", { provider: nextProvider })}
       />
       {sidebarOpen && <button className="sidebar-overlay" type="button" aria-label="Close sessions" onClick={closeSidebar} />}
 
@@ -648,7 +666,7 @@ function App() {
           <span className="chat-header-title">
             {!connected ? "Connecting..." :
              !initDone ? "Initializing..." :
-             apiKey ? "Ready" : "Set API Key"}
+             credentialReady ? "Ready" : "Set API Key"}
           </span>
           {statusMsg && (
             <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8 }}>{statusMsg}</span>
@@ -692,7 +710,7 @@ function App() {
               <div className="welcome-text">
                 A minimalist coding agent. Use your AI to read, write, edit, and debug your project.
               </div>
-              {!apiKey && initDone && (
+              {!credentialReady && initDone && (
                 <div className="welcome-hint">
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{flexShrink:0}}>
                     <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.5"/>
@@ -806,12 +824,12 @@ function App() {
               onKeyDown={handleKeyDown}
               placeholder={sending ? "Queue a steer or follow-up message..." : "Ask anything..."}
               rows={1}
-              disabled={!apiKey || !initDone}
+              disabled={!credentialReady || !initDone}
             />
             <button
               className={`send-btn ${sending ? "sending" : ""}`}
               onClick={handleSend}
-              disabled={(!input.trim() && pendingImagesRef.current.length === 0 && !sending) || !apiKey || !initDone}
+              disabled={(!input.trim() && pendingImagesRef.current.length === 0 && !sending) || !credentialReady || !initDone}
               title={sending ? "Queue steering message" : "Send"}
             >
               {sending ? (

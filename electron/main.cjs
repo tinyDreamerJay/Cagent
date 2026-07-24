@@ -10,6 +10,7 @@ const {
   assertWhitelistedResource,
   copyFileVerified,
 } = require("./resource-utils.cjs");
+const { mergeProviderStates, openAuthUrl } = require("./auth-management.cjs");
 
 // Suppress EPIPE errors when running with piped stdio
 process.stdout.on("error", () => {});
@@ -38,6 +39,15 @@ const pendingPiRequests = new Map();
 let pendingGuiMessages = { steering: [], followUp: [] };
 let activeSessionFile = null;
 const resourceOpenWhitelist = new Set();
+let authRuntime = null;
+const authPrompts = new Map();
+async function getAuthRuntime() {
+  if (!authRuntime) {
+    const pi = await import("@earendil-works/pi-coding-agent");
+    authRuntime = await pi.ModelRuntime.create({ allowModelNetwork: false });
+  }
+  return authRuntime;
+}
 
 function rejectPendingPiRequests(error) {
   for (const pending of pendingPiRequests.values()) {
@@ -445,6 +455,16 @@ async function publishRendererAuthState() {
   return availableModels;
 }
 
+async function publishProviderStatus() {
+  const models = await publishRendererAuthState();
+  const runtime = await getAuthRuntime();
+  const stored = new Map((await runtime.listCredentials()).map((item) => [item.providerId, item.type]));
+  const authStatuses = new Map(runtime.getProviders().map((provider) => [provider.id, runtime.getProviderAuthStatus(provider.id)]));
+  const merged = mergeProviderStates(runtime.getProviders(), models, stored, runtimeApiKeys, authStatuses);
+  sendToRenderer("auth:status", merged);
+  return merged;
+}
+
 ipcMain.on("pi:command", async (_event, message) => {
   try {
     const payload = message?.payload || {};
@@ -628,26 +648,75 @@ ipcMain.on("pi:command", async (_event, message) => {
       return;
     }
     if (message?.type === "auth:providers") return await initializeRendererSession();
+    if (message?.type === "auth:status") return await publishProviderStatus();
+    if (message?.type === "mcp:list") {
+      sendToRenderer("mcp:list", [{ status: "unsupported", source: "pi 0.81.1", error: "pi 0.81.1 文档明确不包含 built-in MCP，RPC 也无 MCP 事件或工具列表" }]);
+      return;
+    }
+    if (message?.type === "auth:oauth") {
+      const runtime = await getAuthRuntime();
+      const provider = String(payload.provider || "");
+      sendToRenderer("auth:oauth-status", { status: "starting", provider, message: "正在启动 pi OAuth 登录" });
+      try {
+        await runtime.login(provider, "oauth", {
+          notify: (event) => {
+            if (event.type === "auth_url" || event.type === "device_code") openAuthUrl(event, (url) => shell.openExternal(url));
+            sendToRenderer("auth:oauth-event", { provider, event });
+          },
+          prompt: (prompt) => new Promise((resolve, reject) => {
+            const id = `auth-${Date.now()}-${Math.random()}`;
+            authPrompts.set(id, { resolve, reject, provider });
+            sendToRenderer("auth:oauth-prompt", { id, provider, prompt });
+          }),
+        });
+        restartingPi = true;
+        try { stopPiRpc(); await startPiRpc(); await initializeRendererSession(); } finally { restartingPi = false; }
+        sendToRenderer("auth:oauth-status", { status: "complete", provider, message: "OAuth 登录完成，凭据已保存到 pi auth store" });
+        await publishProviderStatus();
+      } catch (error) {
+        sendToRenderer("auth:oauth-status", { status: "failed", provider, message: error?.message || String(error) });
+        throw error;
+      } finally {
+        for (const [id, pending] of authPrompts) {
+          if (pending.provider === provider) authPrompts.delete(id);
+        }
+      }
+      return;
+    }
+    if (message?.type === "auth:prompt-response") { const pending = authPrompts.get(payload.id); if (!pending) throw new Error("unknown or replayed auth prompt"); authPrompts.delete(payload.id); if (payload.cancelled) pending.reject(new Error("Authentication cancelled")); else pending.resolve(String(payload.value || "")); return; }
+    if (message?.type === "auth:clear") {
+      const runtime = await getAuthRuntime();
+      const provider = String(payload.provider);
+      if ((await runtime.listCredentials()).some((item) => item.providerId === provider)) await runtime.logout(provider);
+      if (runtimeApiKeys.has(provider)) { await runtime.removeRuntimeApiKey(provider); runtimeApiKeys.delete(provider); }
+      restartingPi = true;
+      try { stopPiRpc(); await startPiRpc(); await initializeRendererSession(); } finally { restartingPi = false; }
+      await publishProviderStatus();
+      return;
+    }
     if (message?.type === "auth:set-key") {
       const provider = String(payload.provider || "").trim();
       const apiKey = String(payload.apiKey || "").trim();
       if (!provider || !apiKey) throw new Error("provider 和 API Key 不能为空");
-      if (runtimeApiKeys.get(provider) === apiKey) {
-        const models = await publishRendererAuthState();
-        if (!models.length) sendToRenderer("error", { message: `无法从 ${provider} 获取可用模型，请检查 API Key` });
-        return;
+      const mode = payload.mode === "session" ? "session" : "stored";
+      if (mode === "stored") {
+        const runtime = await getAuthRuntime();
+        await runtime.login(provider, "api_key", { prompt: async () => apiKey, notify: (event) => sendToRenderer("auth:oauth-event", { provider, event }) });
+        runtimeApiKeys.delete(provider);
+      } else {
+        runtimeApiKeys.set(provider, apiKey);
       }
-
-      runtimeApiKeys.set(provider, apiKey);
       restartingPi = true;
       stopPiRpc();
       try {
         await startPiRpc();
+        await initializeRendererSession();
       } finally {
         restartingPi = false;
       }
-      const models = await publishRendererAuthState();
-      if (!models.length) sendToRenderer("error", { message: `无法从 ${provider} 获取可用模型，请检查 API Key` });
+      const states = await publishProviderStatus();
+      const selected = states.find((item) => item.provider === provider);
+      if (!selected?.available) sendToRenderer("error", { message: `无法从 ${provider} 获取可用模型，请检查 API Key` });
       return;
     }
   } catch (error) {
