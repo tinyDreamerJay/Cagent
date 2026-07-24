@@ -54,8 +54,9 @@ export function Sidebar({ sessions, activeSession, onSessionSelect, onNewSession
   };
 
   return (
-    <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
+    <aside id="sessions-drawer" className={`sidebar ${mobileOpen ? "open" : ""}`} aria-label="Sessions">
       <div className="sidebar-header">
+        <button className="sidebar-close" type="button" aria-label="Close sessions" onClick={onMobileClose}>x</button>
         <div className="sidebar-logo">
           <div className="sidebar-logo-icon">
             <CagentLogo />

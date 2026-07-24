@@ -37,6 +37,7 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [cwd, setCwd] = useState(() => localStorage.getItem("cagent_cwd") || "");
@@ -69,6 +70,20 @@ function App() {
   const rafRef = useRef<number | null>(null);
   const streamingTextRef = useRef("");
   const pendingImagesRef = useRef<{ data: string; mimeType: string }[]>([]);
+
+  const closeSidebar = useCallback(() => {
+    setSidebarOpen(false);
+    requestAnimationFrame(() => sidebarToggleRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeSidebar();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [closeSidebar, sidebarOpen]);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -604,12 +619,23 @@ function App() {
         cwd={cwd}
         onCwdChange={handleCwdChange}
         mobileOpen={sidebarOpen}
-        onMobileClose={() => setSidebarOpen(false)}
+        onMobileClose={closeSidebar}
       />
+      {sidebarOpen && <button className="sidebar-overlay" type="button" aria-label="Close sessions" onClick={closeSidebar} />}
 
       <main className="main-area">
         <header className="chat-header">
-          <button className="sidebar-toggle" type="button" onClick={() => setSidebarOpen((open) => !open)} aria-label="Toggle sessions">Sessions</button>
+          <button
+            ref={sidebarToggleRef}
+            className="sidebar-toggle"
+            type="button"
+            onClick={() => sidebarOpen ? closeSidebar() : setSidebarOpen(true)}
+            aria-label="Toggle sessions"
+            aria-expanded={sidebarOpen}
+            aria-controls="sessions-drawer"
+          >
+            Sessions
+          </button>
           <span className="chat-header-title">
             {!connected ? "Connecting..." :
              !initDone ? "Initializing..." :
