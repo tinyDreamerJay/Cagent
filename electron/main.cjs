@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, screen } = require("electron");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -534,11 +534,13 @@ ipcMain.on("pi:command", async (_event, message) => {
 });
 
 async function createWindow() {
+  const { width: workWidth, height: workHeight } = screen.getPrimaryDisplay().workAreaSize;
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: Math.min(1200, Math.max(680, workWidth - 48)),
+    height: Math.min(800, Math.max(400, workHeight - 48)),
     minWidth: 680,
     minHeight: 400,
+    center: true,
     title: "Cagent",
     backgroundColor: "#0d0d0d",
     show: false,
