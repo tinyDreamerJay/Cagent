@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, screen } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, screen, dialog } = require("electron");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -30,6 +30,7 @@ const runtimeApiKeys = new Map();
 let restartingPi = false;
 const pendingPiRequests = new Map();
 let pendingGuiMessages = { steering: [], followUp: [] };
+let activeSessionFile = null;
 
 function rejectPendingPiRequests(error) {
   for (const pending of pendingPiRequests.values()) {
@@ -120,21 +121,35 @@ function messageContentText(message) {
     .join("\n");
 }
 
-function scanPiResources() {
-  const roots = [
-    ["skill", path.join(os.homedir(), ".pi", "agent", "skills")],
-    ["prompt", path.join(os.homedir(), ".pi", "agent", "prompts")],
-    ["extension", path.join(os.homedir(), ".pi", "agent", "extensions")],
-    ["command", path.join(os.homedir(), ".pi", "agent", "commands")],
-  ];
+async function scanPiResources() {
+  const pi = await import(pathToFileURL(path.join(__dirname, "..", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js")).href);
+  const loader = new pi.DefaultResourceLoader({ cwd: currentCwd, agentDir: path.join(os.homedir(), ".pi", "agent") });
+  await loader.reload();
   const resources = [];
-  for (const [kind, root] of roots) {
+  const add = (kind, item, name, filePath) => resources.push({ kind, name, path: filePath, source: item?.sourceInfo?.scope || item?.sourceInfo?.source || "unknown", status: "available", description: item?.description });
+  for (const item of loader.getSkills().skills) add("skill", item, item.name, item.filePath);
+  for (const item of loader.getPrompts().prompts) add("prompt", item, item.name, item.filePath);
+  for (const item of loader.getExtensions().extensions) add("extension", item, path.basename(item.path), item.resolvedPath || item.path);
+  for (const diagnostic of [...loader.getSkills().diagnostics, ...loader.getPrompts().diagnostics, ...loader.getExtensions().errors]) resources.push({ kind: "resource", name: diagnostic.path || "resource", path: diagnostic.path, source: "unknown", status: "error", error: diagnostic.error || diagnostic.message });
+  return resources;
+/*
+  const roots = [["user", path.join(os.homedir(), ".pi", "agent")], ["project", path.join(currentCwd, ".pi")]];
+  const kinds = [["skill", "skills"], ["prompt", "prompts"], ["extension", "extensions"], ["command", "commands"]];
+  const resources = [];
+  for (const [source, base] of roots) for (const [kind, folder] of kinds) {
+    const root = path.join(base, folder);
     if (!fs.existsSync(root)) continue;
-    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-      resources.push({ kind, name: entry.name, source: "user", path: path.join(root, entry.name), status: "active" });
+    try {
+      for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+        const full = path.join(root, entry.name);
+        resources.push({ kind, name: entry.name, source, path: full, status: "available" });
+      }
+    } catch (error) {
+      resources.push({ kind, name: folder, source, path: root, status: "error", error: error.message });
     }
   }
   return resources;
+*/
 }
 
 function toRendererMessages(messages) {
@@ -312,6 +327,7 @@ async function initializeRendererSession() {
   const state = await sendPiCommand({ type: "get_state" });
   const result = await sendPiCommand({ type: "get_available_models" });
   availableModels = result?.models || [];
+  activeSessionFile = state?.sessionFile || activeSessionFile;
   sendToRenderer("session:ready", { sessionId: state?.sessionId, sessionFile: state?.sessionFile, cwd: currentCwd });
   const providers = [...new Set(availableModels.map((model) => model.provider))];
   sendToRenderer("auth:providers", providers);
@@ -438,7 +454,11 @@ ipcMain.on("pi:command", async (_event, message) => {
       return;
     }
     if (message?.type === "session:resources") {
-      sendToRenderer("session:resources", { resources: scanPiResources(), capabilities: { reload: false, enable: false, disable: false, open: true } });
+      try {
+        const result = await sendPiCommand({ type: "get_commands" });
+        const commands = (result?.commands || []).map((command) => ({ kind: "command", name: command.name, source: command.source || "pi", path: "", status: "available", description: command.description }));
+        sendToRenderer("session:resources", { resources: [...await scanPiResources(), ...commands], capabilities: { refresh: true, open: true } });
+      } catch (error) { sendToRenderer("session:resources", { resources: [], error: error.message, capabilities: { refresh: true, open: true } }); }
       return;
     }
     if (message?.type === "session:commands") {
@@ -488,10 +508,12 @@ ipcMain.on("pi:command", async (_event, message) => {
       return;
     }
     if (message?.type === "session:export-jsonl") {
-      const result = await sendPiCommand({ type: "get_messages" });
-      const outputPath = path.join(currentCwd, `cagent-session-${Date.now()}.jsonl`);
-      const rows = (result?.messages || []).map((item) => JSON.stringify(item)).join("\n");
-      fs.writeFileSync(outputPath, rows ? `${rows}\n` : "", "utf8");
+      const sessionRoot = path.resolve(path.join(os.homedir(), ".pi", "agent"));
+      if (!activeSessionFile || !fs.existsSync(activeSessionFile) || !path.resolve(activeSessionFile).startsWith(`${sessionRoot}${path.sep}`)) throw new Error("Current pi session file is unavailable");
+      const picked = await dialog.showSaveDialog(mainWindow, { title: "Export pi session JSONL", defaultPath: path.basename(activeSessionFile), filters: [{ name: "JSONL", extensions: ["jsonl"] }] });
+      if (picked.canceled || !picked.filePath) return;
+      const outputPath = picked.filePath;
+      fs.copyFileSync(activeSessionFile, outputPath);
       sendToRenderer("session:exported", { path: outputPath, format: "jsonl" });
       return;
     }

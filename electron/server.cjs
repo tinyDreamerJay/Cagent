@@ -449,11 +449,6 @@ wss.on("connection", (ws) => {
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", name: "Cagent" });
 });
-app.get('/api/resources', (_req, res) => res.json({ resources: scanResources(), capabilities: resourceCapabilities() }));
-app.get('/api/stats', (_req, res) => res.json({ tokens: { input: 0, output: 0, total: 0 }, cache: { read: 0, write: 0 }, cost: 0, context: { used: 0, limit: 0, percent: 0 }, compaction: { count: 0 }, source: 'pi session events' }));
-app.post('/api/resources/action', (req, res) => { const action = req.body?.action; if (action === 'open') { const target = req.body?.path; if (typeof target !== 'string' || !fs.existsSync(target)) return res.status(404).json({ ok: false, error: 'resource path not found' }); return res.json({ ok: true, path: target }); } return res.status(409).json({ ok: false, error: `unsupported resource action: ${action}`, capabilities: resourceCapabilities() }); });
-app.get('/api/export', (req, res) => { const data = { exportedAt: new Date().toISOString(), resources: scanResources(), stats: { tokens: { input: 0, output: 0, total: 0 } } }; if (req.query.format === 'html') return res.type('html').send(`<html><body><h1>Cagent export</h1><pre>${JSON.stringify(data, null, 2).replace(/</g, '&lt;')}</pre></body></html>`); res.type('application/jsonl').send(JSON.stringify(data) + '\n'); });
-app.post('/api/import', (req, res) => { const data = req.body; if (!data || typeof data !== 'object') return res.status(400).json({ ok: false, error: 'invalid import payload' }); res.json({ ok: true, restored: { resources: Array.isArray(data.resources) ? data.resources.length : 0 }, note: 'Resource files are not overwritten; import is metadata-only.' }); });
 
 httpServer.listen(PORT, () => {
   console.log(`[Cagent] Server running on http://localhost:${PORT}`);
