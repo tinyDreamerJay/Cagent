@@ -31,6 +31,7 @@ let restartingPi = false;
 const pendingPiRequests = new Map();
 let pendingGuiMessages = { steering: [], followUp: [] };
 let activeSessionFile = null;
+const resourceOpenWhitelist = new Set();
 
 function rejectPendingPiRequests(error) {
   for (const pending of pendingPiRequests.values()) {
@@ -123,33 +124,19 @@ function messageContentText(message) {
 
 async function scanPiResources() {
   const pi = await import(pathToFileURL(path.join(__dirname, "..", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js")).href);
-  const loader = new pi.DefaultResourceLoader({ cwd: currentCwd, agentDir: path.join(os.homedir(), ".pi", "agent") });
+  const agentDir = path.join(os.homedir(), ".pi", "agent");
+  const loader = new pi.DefaultResourceLoader({ cwd: currentCwd, agentDir, noExtensions: true });
   await loader.reload();
   const resources = [];
-  const add = (kind, item, name, filePath) => resources.push({ kind, name, path: filePath, source: item?.sourceInfo?.scope || item?.sourceInfo?.source || "unknown", status: "available", description: item?.description });
+  resourceOpenWhitelist.clear();
+  const add = (kind, item, name, filePath, status = "available") => { let realPath = filePath; try { realPath = fs.realpathSync(filePath); resourceOpenWhitelist.add(realPath); resourceOpenWhitelist.add(path.dirname(realPath)); } catch { status = "error"; } resources.push({ kind, name, path: realPath, source: item?.sourceInfo?.scope || item?.sourceInfo?.source || "unknown", status, description: item?.description }); };
   for (const item of loader.getSkills().skills) add("skill", item, item.name, item.filePath);
   for (const item of loader.getPrompts().prompts) add("prompt", item, item.name, item.filePath);
-  for (const item of loader.getExtensions().extensions) add("extension", item, path.basename(item.path), item.resolvedPath || item.path);
-  for (const diagnostic of [...loader.getSkills().diagnostics, ...loader.getPrompts().diagnostics, ...loader.getExtensions().errors]) resources.push({ kind: "resource", name: diagnostic.path || "resource", path: diagnostic.path, source: "unknown", status: "error", error: diagnostic.error || diagnostic.message });
+  const settings = pi.SettingsManager.create(currentCwd, agentDir);
+  const packages = new pi.DefaultPackageManager({ cwd: currentCwd, agentDir, settingsManager: settings });
+  for (const pkg of packages.listConfiguredPackages()) if (pkg.installedPath) add("extension", { sourceInfo: { scope: pkg.scope, source: pkg.source } }, path.basename(pkg.installedPath), pkg.installedPath, pkg.filtered ? "disabled" : "configured");
+  for (const diagnostic of [...loader.getSkills().diagnostics, ...loader.getPrompts().diagnostics]) resources.push({ kind: "resource", name: diagnostic.path || "resource", path: diagnostic.path, source: "unknown", status: "error", error: diagnostic.error || diagnostic.message });
   return resources;
-/*
-  const roots = [["user", path.join(os.homedir(), ".pi", "agent")], ["project", path.join(currentCwd, ".pi")]];
-  const kinds = [["skill", "skills"], ["prompt", "prompts"], ["extension", "extensions"], ["command", "commands"]];
-  const resources = [];
-  for (const [source, base] of roots) for (const [kind, folder] of kinds) {
-    const root = path.join(base, folder);
-    if (!fs.existsSync(root)) continue;
-    try {
-      for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-        const full = path.join(root, entry.name);
-        resources.push({ kind, name: entry.name, source, path: full, status: "available" });
-      }
-    } catch (error) {
-      resources.push({ kind, name: folder, source, path: root, status: "error", error: error.message });
-    }
-  }
-  return resources;
-*/
 }
 
 function toRendererMessages(messages) {
@@ -513,14 +500,16 @@ ipcMain.on("pi:command", async (_event, message) => {
       const picked = await dialog.showSaveDialog(mainWindow, { title: "Export pi session JSONL", defaultPath: path.basename(activeSessionFile), filters: [{ name: "JSONL", extensions: ["jsonl"] }] });
       if (picked.canceled || !picked.filePath) return;
       const outputPath = picked.filePath;
+      if (path.resolve(outputPath) === path.resolve(activeSessionFile)) throw new Error("Export destination must differ from the active pi session file");
       fs.copyFileSync(activeSessionFile, outputPath);
+      if (fs.statSync(outputPath).size !== fs.statSync(activeSessionFile).size) throw new Error("Exported session size verification failed");
       sendToRenderer("session:exported", { path: outputPath, format: "jsonl" });
       return;
     }
     if (message?.type === "resource:open") {
-      const target = path.resolve(String(payload?.path || ""));
-      const allowedRoots = [path.join(os.homedir(), ".pi", "agent")].map((root) => path.resolve(root));
-      if (!allowedRoots.some((root) => target === root || target.startsWith(`${root}${path.sep}`))) throw new Error("Resource path is outside the pi agent directory");
+      const requested = String(payload?.path || "");
+      const target = fs.realpathSync(requested);
+      if (!resourceOpenWhitelist.has(target)) throw new Error("Resource path is not in the current pi inventory");
       await shell.openPath(target);
       return;
     }
