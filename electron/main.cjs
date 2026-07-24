@@ -300,7 +300,11 @@ async function initializeRendererSession() {
     providersWithModels.get(model.provider).push(model.id);
   }
   for (const [provider, models] of providersWithModels) {
-    sendToRenderer("auth:key-ready", { provider, models, source: "pi" });
+    // DeepSeek's sentinel exposes its models before a user enters a key. It is
+    // not a real credential and must not make the renderer select DeepSeek.
+    if (runtimeApiKeys.has(provider)) {
+      sendToRenderer("auth:key-ready", { provider, models, source: "pi" });
+    }
   }
   await publishSessionState(state);
   await publishPiMessages();
