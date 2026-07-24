@@ -44,6 +44,8 @@ AI 模型
 
 桌面工作台通过 `preload.cjs` 暴露最小 `workspace` IPC。文件树、预览、Git 状态和终端请求均由 Electron 主进程执行；路径会解析并限制在当前 `cwd` 内，`release`、`.git` 和 `node_modules` 不作为默认项目内容展示。Git 写入、分支创建、提交和终端命令先返回审批请求，renderer 不接触 Node API。
 
+Worktree 创建使用目录选择器选择项目外 sibling 目标，校验目标不存在或为空、分支不存在后，以 `git worktree add -b codex/<name> <target> <start-ref>` 创建。项目切换会先终止旧终端并清理审批；新 pi cwd 启动失败时恢复旧 RPC/cwd。
+
 ## Pi 工具权限闸门
 
 `electron/permission-gate.cjs` 作为 pi RPC extension 在所有 provider extension 前加载，监听 `tool_call`。它校验 `read/write/edit` 的路径是否位于当前 cwd，并将写入、越界访问、提权/破坏性 bash、外部网络和安装命令按 `ask/allow/block` 策略处理。`ask` 通过 pi 的 `ctx.ui.select` 产生 `extension_ui_request`，沿用现有 `extension_ui_response` 一次性 request id；无 UI 时统一 block。策略可通过 `CAGENT_PERMISSION_POLICY` JSON 覆盖。

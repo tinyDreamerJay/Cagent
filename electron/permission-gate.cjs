@@ -11,7 +11,11 @@ function policyFor(tool, risk) {
 function resolveInside(cwd, value) {
   const target = path.resolve(cwd, String(value || ""));
   const root = path.resolve(cwd);
-  return target === root || target.startsWith(root + path.sep);
+  const rootReal = fs.realpathSync.native(root);
+  let existing = target;
+  while (!fs.existsSync(existing)) { const next = path.dirname(existing); if (next === existing) return false; existing = next; }
+  const real = fs.realpathSync.native(existing);
+  return real === rootReal || real.startsWith(rootReal + path.sep);
 }
 
 function bashRisk(command) {
@@ -35,7 +39,7 @@ module.exports = function permissionGate(pi) {
       if (!resolveInside(cwd, target)) risk = "boundary";
       else if (tool === "write" || tool === "edit") risk = "mutation";
     } else if (tool === "bash") {
-      risk = bashRisk(input.command);
+      risk = bashRisk(input.command) || "command";
     }
     if (!risk) return undefined;
     const policy = policyFor(tool, risk);

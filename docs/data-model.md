@@ -95,3 +95,5 @@ let abortCtrl = null;        // AbortController
 
 Pi tool permission request 由 RPC extension 产生：`{ id, method: "select", title, message, options }`。renderer 只回传该 `id` 对应的选择，主进程转发 `extension_ui_response`；extension 不接受 renderer 传入的工具名、路径或命令作为授权依据。
 
+Workspace Git 状态中的 `worktrees` 是 `{ path, head, branch }[]` 结构化列表。终端协议包含 `terminal-start`、`terminal-write`、`terminal-resize`、`terminal-kill`；当前 cmd.exe 后端返回 resize unsupported，不向 GUI 暴露 resize 控件。
+

@@ -577,8 +577,8 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <WorkspacePanel />
     <div className="app-container">
+      <WorkspacePanel />
       {extensionRequest && (
         <div className="extension-overlay" role="dialog" aria-modal="true" aria-label={extensionRequest.title || "Extension request"}>
           <div className="extension-dialog">

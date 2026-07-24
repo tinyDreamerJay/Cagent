@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 type Entry = { name: string; directory: boolean };
 type Approval = { id: string; type: string; summary: string };
-type GitState = { branch: string; status: string; diff: string; worktrees: string };
+type GitState = { branch: string; status: string; diff: string; worktrees: { path: string; head: string; branch: string }[] };
 
 export function WorkspacePanel() {
   const api = window.cagent?.workspace;
@@ -16,6 +16,11 @@ export function WorkspacePanel() {
   const [terminalRunning, setTerminalRunning] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [error, setError] = useState("");
+  const [commitMessage, setCommitMessage] = useState("");
+  const [branchName, setBranchName] = useState("");
+  const [worktreeName, setWorktreeName] = useState("");
+  const [worktreeTarget, setWorktreeTarget] = useState("");
+  const [startRef, setStartRef] = useState("HEAD");
 
   const loadFiles = useCallback(async (nextPath = ".") => {
     try {
@@ -60,8 +65,9 @@ export function WorkspacePanel() {
         {entries.length === 0 && !error && <div className="workspace-empty">No files</div>}
         {entries.map((entry) => <button type="button" key={entry.name} onClick={() => openEntry(entry)}>{entry.directory ? "▸ " : "  "}{entry.name}</button>)}
       </div>
-      {git && <><pre className="workspace-output" aria-label="Git status">{git.branch}\n{git.status || "clean"}\n{git.diff}\n{git.worktrees}</pre><div className="workspace-actions"><button type="button" onClick={() => request("git-stage", { paths: git.status.split("\n").filter(Boolean).map((line) => line.slice(3).trim()) })}>Stage changed</button><button type="button" onClick={() => request("git-commit", { message: window.prompt("Commit message") || "Update" })}>Commit</button><button type="button" onClick={() => request("git-branch", { name: window.prompt("Branch name") || "codex/workspace" })}>New branch</button><button type="button" onClick={() => request("worktree-add", { name: window.prompt("Worktree name") || "codex-worktree" })}>New worktree</button></div></>}
+      {git && <><pre className="workspace-output" aria-label="Git status">{git.branch}{"\n"}{git.status || "clean"}{"\n"}{git.diff}</pre><div className="workspace-actions"><button type="button" onClick={() => request("git-stage", { paths: git.status.split("\n").filter(Boolean).map((line) => line.slice(3).trim()) })}>Stage changed</button><input aria-label="Commit message" value={commitMessage} onChange={(e) => setCommitMessage(e.target.value)} placeholder="Commit message" /><button type="button" disabled={!commitMessage.trim()} onClick={() => request("git-commit", { message: commitMessage })}>Commit</button><input aria-label="Branch name" value={branchName} onChange={(e) => setBranchName(e.target.value)} placeholder="Branch name" /><button type="button" disabled={!branchName.trim()} onClick={() => request("git-branch", { name: branchName })}>New branch</button><input aria-label="Worktree name" value={worktreeName} onChange={(e) => setWorktreeName(e.target.value)} placeholder="Worktree name" /><input aria-label="Worktree target" value={worktreeTarget} onChange={(e) => setWorktreeTarget(e.target.value)} placeholder="Target directory" /><input aria-label="Start ref" value={startRef} onChange={(e) => setStartRef(e.target.value)} placeholder="Start ref" /><button type="button" disabled={!worktreeName || !worktreeTarget} onClick={() => request("worktree-add", { name: worktreeName, target: worktreeTarget, startRef })}>New worktree</button></div><div className="workspace-worktrees" aria-label="Worktrees">{git.worktrees.map((item) => <div key={item.path}>{item.branch} · {item.path}</div>)}</div></>}
       {preview && <pre className="workspace-preview" aria-label="File preview">{preview}</pre>}
+      <button type="button" onClick={async () => { const result = await request("choose-worktree-target"); if (result?.target) setWorktreeTarget(result.target); }}>Choose worktree target</button>
       <div className="workspace-terminal">
         <div className="terminal-actions"><button type="button" onClick={() => request("terminal-start")}>Start</button><button type="button" onClick={() => request("terminal-kill")}>Kill</button></div>
         <input aria-label="Terminal command" value={command} onChange={(event) => setCommand(event.target.value)} placeholder="Run command..." onKeyDown={(event) => { if (event.key === "Enter" && command.trim()) { request("terminal", { command }); setCommand(""); } }} />
