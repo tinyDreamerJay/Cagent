@@ -2,27 +2,22 @@
 
 ## 开发流程
 
-### 启动开发服务器
+### 启动桌面开发版
 
 ```bash
 # 安装所有依赖
 npm run install:all
 
-# 分别启动（推荐，避免端口冲突）
-# 终端 1 — 后端（端口 4120）
-npm run dev:server
-
-# 终端 2 — 前端（端口 5173）
+# 终端 1 — Vite（端口 5173）
 npm run dev:client
 
-# 浏览器访问 http://localhost:5173
+# 终端 2 — Electron（通过 IPC 启动 pi RPC）
+npm run dev:electron
 ```
 
-### 不要用 npm run dev 同时启动
+### 遗留 server 与组合命令
 
-`npm run dev` 用 concurrently 同时启动 server + client + electron，会导致：
-- server (tsx watch) 和 electron（内嵌 server）抢 4120 端口
-- electron 起不来
+`npm run dev:server` 会启动遗留 WebSocket server，但当前 GUI 没有连接它。当前 `npm run dev` 仍会额外启动这个无关 server，日常桌面开发应使用上面的两个独立命令，避免把遗留日志误当成当前行为。
 
 ## 构建打包
 
@@ -101,25 +96,22 @@ Windows 上解压会失败。**不影响 asar 打包**，只是无法生成安�
 打包后 Electron 用 `file://` 协议加载页面，**Vite 必须设置 `base: './'`**，
 否则 JS/CSS 无法加载（绝对路径在 file:// 下无效）。
 
-### 端口冲突
+### 4120 端口
 
-Cagent.exe 启动时如果 4120 端口被占用，内嵌 server 直接崩溃，
-Electron 窗口白屏。
+当前 Electron 主链路不依赖 4120 端口。`launch-cagent.ps1` 仍会清理该端口，以免遗留 server 进程干扰本地环境；端口占用不应被当作 pi RPC 主链路故障的根因。
 
-桌面快捷方式的启动脚本（launch-cagent.ps1）在启动前自动清理端口。
+### 单实例
 
-### 多实例
-
-如果多次双击快捷方式，会启动多个 Cagent.exe 实例。
-每个实例都尝试监听 4120 端口，只有第一个成功。
-启动脚本已加入单实例处理（启动前杀掉旧进程）。
+Electron 使用 single-instance lock；直接重复启动时，第二个实例退出并聚焦现有窗口。桌面启动脚本还会在启动前终止旧 `Cagent` 进程，因此从快捷方式启动会得到一个新的单实例进程。
 
 ## 提交前检查
 
 - 不提交 `.env*`、`node_modules/`、`dist/`、`release/`（`.gitignore` 已配置）
-- 修改 `electron/server.cjs` 后，确认 `server/src/` 中的对应逻辑也同步
+- 新增桌面能力时实现到 Electron IPC + pi RPC 主链路，不要继续扩展旧版 server
+- 明确维护遗留 WebSocket 实现时，同时检查 `electron/server.cjs` 与 `server/src/` 的对应逻辑；它们当前未接入 GUI
 - 修改前端后运行 `cd client && npm run build` 确保能正常构建
 - 构建后的 `vite.config.ts` 中 `base: './'` 不能被误删
+- 修改桌面相关代码后运行 `npm run package`，并按“桌面快捷方式验收”从最终入口复测
 
 ## 环境变量
 
@@ -128,4 +120,6 @@ Electron 窗口白屏。
 | `ANTHROPIC_API_KEY` | Anthropic API 密钥（系统级，应用内也可设置） |
 | `OPENAI_API_KEY` | OpenAI API 密钥（备用） |
 | `CAGENT_TEST_API_KEY` | 仅供需要真实 provider 的本地测试使用；不得写入脚本、文档或 Git |
-| `PORT` | 服务端口（默认 4120） |
+| `CAGENT_PERMISSION_POLICY` | Electron/pi 工具权限策略 JSON；未设置时使用默认 ask/allow/block 规则 |
+| `CAGENT_DEVTOOLS` | 开发版设为 `1` 时打开 Electron DevTools |
+| `PORT` | 仅遗留 WebSocket server 使用，默认 4120；当前桌面主链路不使用 |

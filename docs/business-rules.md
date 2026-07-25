@@ -16,48 +16,49 @@
 
 ### 设置流程
 
-1. 用户在侧边栏输入 API Key（支持 `sk-ant-...` 格式）
-2. 前端保存到 `localStorage`（key: `cagent_apikey`）
-3. 前端发送 `auth:set-key` → 服务端调用 `modelRuntime.setRuntimeApiKey("anthropic", key)`
-4. 服务端调用 `getAvailable("anthropic")` 刷新模型列表
-5. 服务端返回 `auth:key-ready` → 前端显示"就绪"状态
+1. GUI 从 pi runtime 读取 Provider、认证能力、凭据来源和可用模型。
+2. 用户选择 Provider，可使用 API Key；pi 声明支持 OAuth 时也可从 GUI 发起 OAuth。
+3. API Key 只作为一次性 IPC payload 交给 Electron 主进程；stored 模式使用 `ModelRuntime.login(provider, "api_key")` 写入 pi auth store，session 模式只保存在主进程内存并注入当前 pi RPC 子进程。两种模式都不写入浏览器 `localStorage`。
+4. OAuth 使用 `ModelRuntime.login(provider, "oauth")`，需要用户交互时通过受控 GUI 对话框完成。
+5. 移除凭据时调用 pi 的 `logout` 和/或 `removeRuntimeApiKey`，随后重启 pi RPC 并重新发布状态。
 
 ### 约束
 
-- API Key 仅在本地存储，不上传到任何第三方
-- 目前只支持 Anthropic provider（`"anthropic"`）
+- renderer 不持久化或回显 API Key；`localStorage` 只保存项目路径、Provider 选择等非敏感偏好
+- Provider 列表和模型能力以当前 pi runtime 为准，不能硬编码为 Anthropic
+- 凭据会由对应 AI Provider 使用；“本地处理”不等于不会发送给用户选择的 Provider
 
 ## Provider/Auth 与 MCP 管理
 
-- renderer 只接收 provider 的 `configured`、`source`、模型列表和错误摘要，不接收 API Key；密钥由 pi runtime 保留在服务端内存/既有 credential store 中。
-- `auth:set-key` 使用 pi 0.81.1 的 `ModelRuntime.setRuntimeApiKey`。该版本未导出 `clearRuntimeApiKey` 或 OAuth RPC，因此界面会明确报告清除/OAuth 不可用，不伪造成功状态。
-- MCP 仅发现 `~/.pi/agent/mcp.json` 或 `settings.json` 中的配置并展示来源；pi 0.81.1 未导出 MCP reconnect/list RPC，刷新操作只重新读取配置并标记能力边界。
+- renderer 只接收 Provider 的 `configured`、`source`、模型列表、认证能力和错误摘要，不接收 API Key。
+- 认证管理使用 pi 0.81.1 `ModelRuntime` 的 `login`、`logout` 和 `removeRuntimeApiKey`；界面只展示 runtime 实际声明的 OAuth 能力。
+- pi 0.81.1 明确没有 built-in MCP，也没有 MCP RPC/事件。GUI 只能展示 unsupported 说明，不能通过扫描配置文件伪造连接状态。
 - 如果初始化尚未完成就设置 Key，前端将 Key 排队，等 `session:ready` 后自动发送
-- 没有 API Key 时，输入框禁用，无法发送消息
+- 当前 Provider 没有可用凭据或模型时，输入框禁用，无法发送消息
 
 ## 会话流程
 
 ### 初始化
 
-1. 前端连接 WebSocket → 自动发送 `session:init`
-2. 服务端加载 pi SDK、创建 SessionManager 和 ModelRuntime
-3. 服务端返回 `session:ready`
-4. 前端发送已保存的 API Key（如有）
+1. Electron renderer 通过 preload IPC bridge 发送 `session:init`
+2. Electron 主进程启动 pi JSON Lines RPC 子进程并创建认证 runtime
+3. 主进程转发 `session:ready`、Provider 状态、模型和持久化会话
+4. 用户选择已有凭据或在 Settings 中登录
 
 ### 对话
 
 1. 用户输入文本 → 按 Enter 发送
 2. 前端发送 `session:prompt`，同时显示用户消息气泡
-3. 服务端创建 AgentSession，调用 `session.prompt()`
-4. 服务端流式推送 `token` → 前端实时更新助手消息
+3. Electron 主进程向 pi RPC 发送 `prompt`
+4. 主进程把 pi `message_update` 映射为 `token` → 前端实时更新助手消息
 5. 如果有工具调用 → `tool:call` + `tool:result`
 6. 完成后 → `message:done`
 
 ### 中止
 
 - 发送中点击按钮 → `session:abort`
-- 服务端调用 `AbortController.abort()`
-- 返回 `message:aborted`
+- Electron 主进程向 pi RPC 发送 `abort`
+- pi settle 后主进程统一返回 `message:done`；当前主链路不单独发送 `message:aborted`
 
 ### 新建会话
 
@@ -104,8 +105,8 @@ pi SDK 自带四个内置工具：
 
 | 来源 | 处理方式 |
 |------|----------|
-| 网络断开 | 自动重连（2 秒后） |
-| 服务端错误 | WebSocket `error` 消息 → 红色消息气泡 |
+| renderer bridge 不可用 | 显示桌面连接不可用并阻塞输入 |
+| 主进程错误 | IPC `error` 事件 → 错误消息气泡 |
 | 初始化失败 | 前端显示"初始化失败"，阻塞输入 |
 | 无可用模型 | 前端显示"没有可用模型，请检查 API Key" |
 | 模型网关失败 | pi `agent_end` 的错误消息转为 GUI `error` 事件，并恢复输入状态 |

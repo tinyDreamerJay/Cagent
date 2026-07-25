@@ -2,7 +2,7 @@
 
 ## 三层结构
 
-Cagent 由 React 渲染进程、Electron 主进程和 pi RPC 子进程组成。`server/` 与 `electron/server.cjs` 保留为旧版 WebSocket 回退实现，桌面应用主链路不再依赖它们。
+Cagent 由 React 渲染进程、Electron 主进程和 pi RPC 子进程组成。`server/` 与 `electron/server.cjs` 是未接入当前 GUI 的遗留 WebSocket 实现，不能作为运行时回退链路。
 
 ### 当前桌面链路（主路径）
 
@@ -14,7 +14,7 @@ Electron 主进程
     │  JSON Lines stdin/stdout RPC
     ▼
 pi-coding-agent runtime
-    │  providers / auth / tools / skills / MCP / extensions / sessions
+    │  providers / auth / tools / skills / extensions / sessions
     ▼
 AI 模型（pi 支持的 provider）
 ```
@@ -23,22 +23,19 @@ AI 模型（pi 支持的 provider）
 - Electron 主进程负责启动、停止和重启 pi RPC，并将事件转发给 renderer
 - `electron/ccswitch-provider.cjs` 通过 pi extension 注入 ccswitch provider
 
-### 旧版兼容链路
+### 未接线的遗留实现
 
 ```
-Electron 窗口
-    │  file:// 加载 client/dist/index.html
-    │  WebSocket (ws://localhost:4120)
-    ▼
-electron/server.cjs (内嵌 server，fork 子进程)
-    │  pi SDK
-    ▼
-AI 模型
+server/src/             electron/server.cjs
+    │                           │
+    └── 旧 WebSocket 代码 ──────┘
+                X
+        当前 client 没有连接入口
 ```
 
-- `server/src/` 提供 Express + WebSocket 开发服务
-- `electron/server.cjs` 是对应的 CJS 内嵌版本
-- 仅在需要兼容旧客户端或排查回归时使用，不应继续向其中添加新的 pi 能力
+- `server/src/` 可以独立启动 Express + WebSocket server，但当前 client 不会连接它
+- `electron/server.cjs` 是旧 CJS 版本，当前 `electron/main.cjs` 不会启动它
+- 这些文件只用于历史源码对照；除非先设计并实现真实接线，否则不得称为运行时回退或用它验收桌面功能
 
 ## 工作台服务
 
@@ -56,13 +53,17 @@ Worktree 创建使用目录选择器选择项目外 sibling 目标，校验目�
 
 ```
 App
-├── Sidebar          # 侧边栏（会话列表、API Key 设置）
-└── main
-    ├── chat-header  # 连接状态、模型名称
-    ├── messages     # 消息列表（用户/助手/错误）
-    │   ├── message-content  # 文本内容（支持 Markdown）
-    │   └── tool-block       # 工具调用展示（可折叠）
-    └── input-container      # 输入框 + 发送按钮
+├── activity-rail    # 主导航、会话/设置入口、Inspector 切换
+├── Sidebar          # pi 会话、Provider、凭据和 MCP 能力说明
+├── main
+│   ├── RuntimeBar   # 模型、thinking、compact 和运行状态
+│   ├── messages     # Markdown、thinking、工具调用与图片
+│   ├── AgentConsole # commands、usage、tree、fork/clone、bash
+│   └── input        # 输入、slash command、steer/follow-up
+└── Inspector
+    ├── WorkspacePanel # Files、Git、Terminal
+    ├── ResourceCenter # Skills、prompts、extensions、commands、导出
+    └── UsagePanel
 ```
 
 ### 状态管理
@@ -75,8 +76,9 @@ App
 | `input` | `string` | 输入框文本 |
 | `sending` | `boolean` | 是否正在发送/等待回复 |
 | `streaming` | `boolean` | 是否正在接收流式 token |
-| `apiKey` | `string` | 用户 API Key（localStorage 持久化） |
-| `initDone` | `boolean` | 服务端初始化是否完成 |
+| `provider` | `string` | 当前选择的 Provider（localStorage 仅保存非敏感选择） |
+| `providerStates` | `ProviderState[]` | pi runtime 报告的凭据来源、能力和模型状态，不含密钥正文 |
+| `initDone` | `boolean` | pi RPC 初始化是否完成 |
 | `connected` | `boolean` | Electron IPC bridge 是否可用 |
 
 ### Electron IPC 通信
@@ -109,12 +111,12 @@ App
 | `session:fork-messages` | `{}` | 读取可供 fork 的用户消息 entry |
 | `session:fork` | `{ entryId }` | 从指定用户消息创建分支会话 |
 | `session:clone` | `{}` | 在当前 leaf 克隆会话 |
-| `auth:set-key` | `{ provider, apiKey }` | 更新运行时凭据并重启 pi RPC |
+| `auth:set-key` | `{ provider, apiKey, mode }` | 按 stored/session 模式设置凭据并重启 pi RPC |
 | `auth:providers` | `{}` | 查询 pi 可用 provider |
 | `auth:status` | `{}` | 查询 provider 凭据来源、配置状态和模型可用性（不含密钥） |
-| `auth:clear` | `{ provider }` | 若 pi 暴露清除 API 则清除，否则返回 `auth:unsupported` |
-| `mcp:list` | `{}` | 发现本地 MCP 配置并报告状态/来源 |
-| `mcp:reconnect` | `{}` | 重新发现 MCP；pi 0.81.1 无 reconnect RPC 时返回 `mcp:unsupported` |
+| `auth:oauth` | `{ provider }` | 调用 `ModelRuntime.login(provider, "oauth")` 并转发交互事件 |
+| `auth:clear` | `{ provider }` | 调用 `logout` / `removeRuntimeApiKey` 移除对应凭据并重启 RPC |
+| `mcp:list` | `{}` | 返回 pi 0.81.1 不支持 built-in MCP 的明确能力边界 |
 
 ### pi 事件 → GUI
 
@@ -125,7 +127,6 @@ App
 | `thinking:delta` | `{ text }` | 独立于正文的流式思考内容 |
 | `message:user` | `{ text }` | 用户消息回显 |
 | `message:done` | `{}` | 回复完成 |
-| `message:aborted` | `{}` | 回复被中止 |
 | `session:state` | `{ sessionId, sessionName?, thinkingLevel, autoCompactionEnabled, messageCount, cwd, ... }` | 当前 pi 会话运行状态 |
 | `session:list` | `PiSession[]` | 当前项目的 pi 持久化会话，`id` 与 `path` 都是会话文件路径 |
 | `session:messages` | `Message[]` | 当前 pi 会话的已持久化用户和助手消息 |
@@ -148,7 +149,7 @@ App
 ### 初始化流程
 
 1. Electron 启动 `dist/rpc-entry.js --mode rpc`
-2. pi 自己加载 `~/.pi/agent`、provider、认证、Skills、MCP 和 Extensions
+2. pi 加载 `~/.pi/agent`、provider、认证、Skills 和 Extensions；pi 0.81.1 不包含 built-in MCP
 3. ccswitch 配置通过 extension 和环境变量注入，不复制到 renderer
 4. GUI 通过 `get_state`、`get_available_models` 等 RPC 命令初始化
 
@@ -156,7 +157,7 @@ App
 
 1. 主进程发送 `{ type: "prompt", message, images }`
 2. pi 通过 stdout 输出 `message_update`、工具事件和 `agent_settled`
-3. 主进程把这些事件映射为 renderer 使用的 `token`、`tool:*` 和 `message:done`
+3. 主进程把这些事件映射为 renderer 使用的 `token`、`tool:*` 和 `message:done`；abort 后也在 pi settle 时统一结束，不额外发送 `message:aborted`
 
 生成期间 renderer 允许提交 `steer` 或 `follow-up`。pi RPC 在此版本只暴露待处理数量、不暴露队列内容，因此 GUI 的队列面板只显示由当前 GUI 提交的消息；在 `agent_settled` 时清空该投影。工具状态以 pi 的 `toolCallId` 关联，thinking delta 不得并入 assistant 正文。
 
@@ -165,9 +166,10 @@ Extension 的 RPC UI 事件中，`setWidget` 映射为 editor 上下方的文本
 ## 重要约束
 
 - **不要引入 React Router**：当前只有一个聊天视图，无需路由
-- **旧版 server 不新增主链路能力**：`electron/server.cjs` 与 `server/src/` 仅用于兼容回退
+- **遗留 server 不新增主链路能力**：`electron/server.cjs` 与 `server/src/` 当前未接入 GUI，仅用于历史源码对照
 - **error payload 必须是 `{ message: string }`**：前端错误处理依赖此格式
-- **API Key 通过主进程运行时覆盖注入 pi**：不要把密钥发送到 renderer 之外的第三方服务，也不要直接操作 credential store
+- **敏感凭据不写入 renderer 持久化**：API Key 由 renderer 一次性提交给主进程，再通过 pi `ModelRuntime.login`/runtime API 注入；状态事件只能返回来源和可用性，不能回传密钥正文
+- **MCP 能力不得伪造**：在升级到确实提供 MCP 的 pi 版本并完成真实集成前，只显示 unsupported 边界，不扫描配置冒充已连接服务
 ## 资源中心增量约定
 
 Electron 主进程使用 `DefaultResourceLoader({ noExtensions: true })` 读取 skills/prompts，避免再次执行 extension；extensions 仅以配置路径做静态 inventory，命令和错误来自已运行 RPC。
