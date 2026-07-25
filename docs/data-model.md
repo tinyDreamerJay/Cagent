@@ -80,7 +80,7 @@ Provider 状态只说明凭据来源和能力。API Key 本身只作为一次性
 - steer/follow-up 队列只保存当前 GUI 已提交内容的投影；pi RPC 只提供计数，`agent_settled` 后清空投影。
 - fork 使用 pi 返回的用户消息 `entryId`，clone 使用当前 leaf；GUI 不自行生成会话分支关系。
 - `session:list` 表示当前项目的活动会话；`session:archives` 表示同项目 `.cagent-archive/` 中的可恢复会话。归档状态由文件所在目录决定，不另建浏览器缓存或数据库标记。
-- `session:state.thinkingLevel` 由主进程补齐：优先使用 RPC 状态，否则读取当前会话 JSONL 中最近的 `thinking_level_change`，并在用户调整后立即更新。
+- `session:state.model` 是 GUI 初始化和切换会话后的模型事实来源；用户主动选择模型时用 Provider 与 Model ID 成对发送，失败后主进程重新发布真实状态。`session:state.thinkingLevel` 由主进程补齐：优先使用 RPC 状态，否则读取当前会话 JSONL 中最近的 `thinking_level_change`，并在用户调整后立即更新。
 - `session:stats.contextUsage.percent` 是上下文已使用比例；renderer 只派生并显示剩余比例，不持久化统计快照。
 
 ## Workspace 与审批

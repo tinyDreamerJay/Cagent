@@ -12,7 +12,7 @@ const {
   copyFileVerified,
 } = require("./resource-utils.cjs");
 const { mergeProviderStates, openAuthUrl } = require("./auth-management.cjs");
-const { archiveSessionFile, getProjectArchiveDir, restoreSessionFile } = require("./session-archive.cjs");
+const { archiveSessionFile, getProjectArchiveDir, resolveProjectArchiveDir, restoreSessionFile, validateArchiveSessionFile } = require("./session-archive.cjs");
 
 // Suppress EPIPE errors when running with piped stdio
 process.stdout.on("error", () => {});
@@ -257,8 +257,9 @@ function toSessionSummary(session) {
 async function listArchivedPiSessions() {
   const archiveDir = getProjectArchiveDir(currentCwd);
   if (!fs.existsSync(archiveDir)) return [];
+  const verifiedArchiveDir = resolveProjectArchiveDir(currentCwd);
   const piModule = await import(pathToFileURL(path.join(__dirname, "..", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js")).href);
-  const sessions = await piModule.SessionManager.list(currentCwd, archiveDir);
+  const sessions = await piModule.SessionManager.list(currentCwd, verifiedArchiveDir);
   return sessions.map(toSessionSummary);
 }
 
@@ -276,13 +277,20 @@ async function archivePiSession(sessionPath) {
   const session = sessions.find((item) => sessionPathKey(item.path) === sessionPathKey(sessionPath));
   if (!session) throw new Error("所选会话不属于当前项目或已归档");
 
-  if (activeSessionFile && sessionPathKey(activeSessionFile) === sessionPathKey(session.path)) {
-    const result = await sendPiCommand({ type: "new_session" });
-    if (result?.cancelled) throw new Error("当前会话仍在运行，暂时无法归档");
+  validateArchiveSessionFile(session.path, currentCwd);
+  const isActive = activeSessionFile && sessionPathKey(activeSessionFile) === sessionPathKey(session.path);
+  let switchedSession = false;
+  try {
+    if (isActive) {
+      const result = await sendPiCommand({ type: "new_session" });
+      if (result?.cancelled) throw new Error("当前会话仍在运行，暂时无法归档");
+      switchedSession = true;
+    }
+    archiveSessionFile(session.path, currentCwd);
+  } finally {
+    if (switchedSession) await initializeRendererSession();
   }
-
-  archiveSessionFile(session.path, currentCwd);
-  await initializeRendererSession();
+  if (!switchedSession) await publishPiSessions();
 }
 
 async function restorePiSession(sessionPath) {
@@ -614,8 +622,11 @@ ipcMain.on("pi:command", async (_event, message) => {
       return;
     }
     if (message?.type === "session:set-model") {
-      await sendPiCommand({ type: "set_model", provider: String(payload.provider || ""), modelId: String(payload.model || "") });
-      await publishSessionState();
+      try {
+        await sendPiCommand({ type: "set_model", provider: String(payload.provider || ""), modelId: String(payload.model || "") });
+      } finally {
+        await publishSessionState();
+      }
       return;
     }
     if (message?.type === "session:set-thinking") {

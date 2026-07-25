@@ -74,12 +74,12 @@
 - 侧边栏会话列表直接由 pi `SessionManager.list(currentCwd)` 读取；会话文件与 pi 上下文是唯一事实来源，不使用浏览器本地会话伪造历史
 - 选择侧边栏会话时，主进程只允许切换当前项目列表中的文件，再调用 pi `switch_session` 和 `get_messages` 重新加载历史
 - 归档会话不删除 JSONL：主进程只允许归档当前项目 `SessionManager.list(currentCwd)` 返回的文件，并移动到同一项目会话目录的 `.cagent-archive/` 子目录。
-- 归档活动会话前必须先让 pi 切换到新会话，避免移动仍在写入的文件；已归档会话可恢复到原项目会话目录，归档和恢复均禁止覆盖同名文件。
+- 归档活动会话前必须先预检目标，再让 pi 切换到新会话，避免移动仍在写入的文件；移动成功或失败后都要重新同步 renderer。已归档会话可恢复到原项目会话目录，归档和恢复均禁止覆盖同名文件，并拒绝通过 junction/symlink 将归档目录指向项目会话目录外。
 
 ### 运行控制
 
 - 思考等级、自动压缩和手动压缩均通过 Electron 主进程调用 pi RPC；前端不得自行模拟这些状态
-- 模型选择必须立即调用 pi `set_model`，再读取 `get_available_thinking_levels`；思考强度选择调用 `set_thinking_level`，并以当前会话的 `thinking_level_change` 记录恢复显示状态。
+- 模型选择必须使用 `(Provider, Model)` 联合标识立即调用 pi `set_model`，不得按 Model ID 反推 Provider，也不得在会话初始化时把 renderer 的旧选择自动写回 pi；思考强度选择调用 `set_thinking_level`，并以当前会话的状态或 `thinking_level_change` 记录恢复显示状态。
 - `Compact` 会压缩当前 pi 会话上下文，避免长对话占满模型上下文；执行期间显示运行状态
 - 发送中禁用运行控制，避免在 pi 正在生成时切换会话状态
 - 发送中输入框仍可用于提交 `steer` 或 `follow-up`：前者交给 pi 立即插入，后者等待当前轮次完成。队列面板仅是当前 GUI 已提交消息的只读投影，不能删除或重排 pi 内部队列。

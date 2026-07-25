@@ -4,6 +4,7 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
 const appSource = fs.readFileSync(path.join(root, "client", "src", "App.tsx"), "utf8");
+const sidebarSource = fs.readFileSync(path.join(root, "client", "src", "components", "Sidebar.tsx"), "utf8");
 const mainSource = fs.readFileSync(path.join(root, "electron", "main.cjs"), "utf8");
 
 const readyStart = appSource.indexOf('subscribe("session:ready"');
@@ -12,9 +13,11 @@ assert.notEqual(readyStart, -1, "session:ready subscription is missing");
 assert.notEqual(readyEnd, -1, "session:ready subscription boundary is missing");
 assert.doesNotMatch(
   appSource.slice(readyStart, readyEnd),
-  /send\("auth:providers"\)/,
-  "session:ready must not request auth:providers; that creates an IPC initialization loop",
+  /send\("(?:auth:providers|session:set-model)"\)/,
+  "session:ready must not request providers or write a renderer model back into pi",
 );
+assert.doesNotMatch(appSource, /configuredModelRef/, "model synchronization must not suppress retries before pi confirms the model");
+assert.match(sidebarSource, /onModelSelect\(event\.target\.value, selectedProvider\)/, "model selection must carry its provider explicitly");
 
 const providerHandlerStart = mainSource.indexOf('message?.type === "auth:providers"');
 const providerHandlerEnd = mainSource.indexOf('message?.type === "auth:status"', providerHandlerStart);

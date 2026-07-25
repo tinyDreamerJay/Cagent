@@ -56,7 +56,6 @@ function App() {
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [initDone, setInitDone] = useState(false);
   const pendingApiKeyRef = useRef<{ key: string; provider: string; mode: "stored" | "session" } | null>(null);
-  const configuredModelRef = useRef("");
   const [statusMsg, setStatusMsg] = useState("");
   const [stats, setStats] = useState<Record<string, unknown> | null>(null);
   const [commands, setCommands] = useState<{ name: string; description?: string; source: string }[]>([]);
@@ -129,7 +128,6 @@ function App() {
     unsubs.push(
       subscribe("session:ready", (p: { cwd?: string; sessionFile?: string }) => {
         setInitDone(true);
-        configuredModelRef.current = "";
         setStatusMsg("");
         if (p?.cwd) {
           const normalized = p.cwd.replace(/\\/g, "/");
@@ -166,7 +164,6 @@ function App() {
         if (stateModel && typeof stateModel === "object") {
           const model = stateModel as { provider?: string; id?: string };
           if (model.provider && model.id) {
-            configuredModelRef.current = `${model.provider}:${model.id}`;
             setProvider(model.provider);
             setSelectedModel(model.id);
             localStorage.setItem("cagent_provider", model.provider);
@@ -436,16 +433,6 @@ function App() {
     return () => unsubs.forEach((u) => u());
   }, [subscribe, send, updateTool]);
 
-  useEffect(() => {
-    if (!initDone || !selectedModel) return;
-    const modelProvider = Object.entries(modelsByProvider).find(([, models]) => models.includes(selectedModel))?.[0] || provider;
-    if (!modelProvider) return;
-    const modelKey = `${modelProvider}:${selectedModel}`;
-    if (configuredModelRef.current === modelKey) return;
-    configuredModelRef.current = modelKey;
-    send("session:set-model", { provider: modelProvider, model: selectedModel });
-  }, [initDone, modelsByProvider, provider, selectedModel, send]);
-
   const handleSend = () => {
     const text = input.trim();
     const images = pendingImagesRef.current;
@@ -536,19 +523,19 @@ function App() {
     return () => document.removeEventListener("paste", handlePaste);
   }, [handlePaste]);
 
-  const handleModelSelect = (model: string) => {
+  const handleModelSelect = (model: string, modelProvider = provider) => {
     setSelectedModel(model);
-    // 找出这个模型对应的 provider 并更新
-    setModelsByProvider((current) => {
-      for (const [prov, mods] of Object.entries(current)) {
-        if (mods.includes(model)) {
-          setProvider(prov);
-          localStorage.setItem("cagent_provider", prov);
-          break;
-        }
-      }
-      return current;
-    });
+    setProvider(modelProvider);
+    localStorage.setItem("cagent_provider", modelProvider);
+    if (initDone) send("session:set-model", { provider: modelProvider, model });
+  };
+
+  const handleProviderSelect = (nextProvider: string) => {
+    const nextModel = (modelsByProvider[nextProvider] || [])[0] || "";
+    setProvider(nextProvider);
+    setSelectedModel(nextModel);
+    localStorage.setItem("cagent_provider", nextProvider);
+    if (initDone && nextModel) send("session:set-model", { provider: nextProvider, model: nextModel });
   };
 
   const handleApiKeySet = (key: string, prov: string, mode: "stored" | "session" = "stored") => {
@@ -669,7 +656,7 @@ function App() {
         onNewSession={handleNewSession}
         onSessionArchive={(id) => send("session:archive", { path: id })}
         onSessionRestore={(id) => send("session:restore", { path: id })}
-        onProviderSelect={(nextProvider) => { setProvider(nextProvider); localStorage.setItem("cagent_provider", nextProvider); setSelectedModel((modelsByProvider[nextProvider] || [])[0] || ""); }}
+        onProviderSelect={handleProviderSelect}
         apiKey={credentialReady ? "ready" : ""}
         provider={provider}
         availableProviders={availableProviders}
