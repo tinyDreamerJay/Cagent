@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, screen, dialog } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, screen, dialog, Menu } = require("electron");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -18,6 +18,53 @@ process.stderr.on("error", () => {});
 
 const isDev = !app.isPackaged;
 const CLIENT_PORT = 5173;
+
+function installChineseMenu() {
+  const template = [
+    {
+      label: "应用",
+      submenu: [
+        { label: "关于 Cagent", role: "about" },
+        { type: "separator" },
+        { label: "退出", role: "quit" },
+      ],
+    },
+    {
+      label: "编辑",
+      submenu: [
+        { label: "撤销", role: "undo" },
+        { label: "重做", role: "redo" },
+        { type: "separator" },
+        { label: "剪切", role: "cut" },
+        { label: "复制", role: "copy" },
+        { label: "粘贴", role: "paste" },
+        { label: "全选", role: "selectAll" },
+      ],
+    },
+    {
+      label: "视图",
+      submenu: [
+        { label: "重新加载", role: "reload" },
+        { label: "强制重新加载", role: "forceReload" },
+        ...(isDev ? [{ label: "开发者工具", role: "toggleDevTools" }] : []),
+        { type: "separator" },
+        { label: "实际大小", role: "resetZoom" },
+        { label: "放大", role: "zoomIn" },
+        { label: "缩小", role: "zoomOut" },
+        { type: "separator" },
+        { label: "全屏", role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "窗口",
+      submenu: [
+        { label: "最小化", role: "minimize" },
+        { label: "关闭", role: "close" },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 // Chromium GPU failures on Windows can leave an otherwise healthy renderer black.
 // This app does not depend on GPU rendering, so prefer a stable software path.
@@ -86,13 +133,13 @@ function sendPiCommand(command) {
   const child = piProcess;
   const stdin = child?.stdin;
   if (!child || !stdin || stdin.destroyed || !stdin.writable || child.exitCode !== null) {
-    return Promise.reject(new Error("pi RPC is not running"));
+    return Promise.reject(new Error("pi RPC 未运行"));
   }
   const id = `cagent-${++piRequestId}`;
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       pendingPiRequests.delete(id);
-      reject(new Error(`pi RPC timed out: ${command.type}`));
+      reject(new Error(`pi RPC 请求超时：${command.type}`));
     }, 30000);
     pendingPiRequests.set(id, { resolve, reject, timeout });
     const failWrite = (error) => {
@@ -180,7 +227,7 @@ async function listPiSessions() {
   return sessions.map((session) => ({
     id: session.path,
     path: session.path,
-    name: session.name || session.firstMessage || "New session",
+    name: session.name || session.firstMessage || "新会话",
     createdAt: session.created?.getTime?.() || 0,
     updatedAt: session.modified?.getTime?.() || 0,
     messageCount: session.messageCount || 0,
@@ -230,7 +277,7 @@ function handlePiEvent(event) {
       sendToRenderer("message:done", {});
     }
   } else if (event.type === "auto_retry_start") {
-    sendToRenderer("status", { message: `Retrying model request (${event.attempt}/${event.maxAttempts})...` });
+    sendToRenderer("status", { message: `正在重试模型请求（${event.attempt}/${event.maxAttempts}）...` });
   } else if (event.type === "auto_retry_end") {
     if (!event.success && event.finalError) {
       sendToRenderer("error", { message: event.finalError });
@@ -252,7 +299,7 @@ function handlePiLine(line) {
     pendingPiRequests.delete(message.id);
     clearTimeout(pending.timeout);
     if (message.success) pending.resolve(message.data);
-    else pending.reject(new Error(message.error || `pi command failed: ${message.command}`));
+    else pending.reject(new Error(message.error || `pi 命令执行失败：${message.command}`));
     return;
   }
   handlePiEvent(message);
@@ -378,7 +425,7 @@ function startPiRpc(cwd) {
     child.stdin.on("error", (error) => {
       if (piProcess !== child) return;
       piReady = false;
-      const rpcError = new Error(`pi RPC input closed: ${error.message}`);
+      const rpcError = new Error(`pi RPC 输入通道已关闭：${error.message}`);
       rejectPendingPiRequests(rpcError);
       if (!restartingPi) sendToRenderer("error", { message: rpcError.message });
     });
@@ -386,7 +433,7 @@ function startPiRpc(cwd) {
     child.once("exit", (code, signal) => {
       if (piProcess !== child) return;
       piReady = false;
-      const error = new Error(`pi RPC exited (code=${code}, signal=${signal})`);
+      const error = new Error(`pi RPC 已退出（退出码=${code}，信号=${signal}）`);
       rejectPendingPiRequests(error);
       if (!restartingPi) sendToRenderer("error", { message: error.message });
     });
@@ -532,7 +579,7 @@ ipcMain.on("pi:command", async (_event, message) => {
       return;
     }
     if (message?.type === "session:compact") {
-      sendToRenderer("status", { message: "Compacting context..." });
+      sendToRenderer("status", { message: "正在压缩上下文..." });
       try {
         await sendPiCommand({ type: "compact" });
       } finally {
@@ -602,7 +649,7 @@ ipcMain.on("pi:command", async (_event, message) => {
     }
     if (message?.type === "session:export-jsonl") {
       const sourcePath = assertSessionFile(activeSessionFile, path.join(os.homedir(), ".pi", "agent", "sessions"));
-      const picked = await dialog.showSaveDialog(mainWindow, { title: "Export pi session JSONL", defaultPath: path.basename(sourcePath), filters: [{ name: "JSONL", extensions: ["jsonl"] }] });
+      const picked = await dialog.showSaveDialog(mainWindow, { title: "导出 pi 会话 JSONL", defaultPath: path.basename(sourcePath), filters: [{ name: "JSONL", extensions: ["jsonl"] }] });
       if (picked.canceled || !picked.filePath) return;
       const outputPath = copyFileVerified(sourcePath, picked.filePath);
       sendToRenderer("session:exported", { path: outputPath, format: "jsonl" });
@@ -643,7 +690,7 @@ ipcMain.on("pi:command", async (_event, message) => {
       const sessionPath = String(payload.path || "");
       const sessions = await listPiSessions();
       if (!sessions.some((session) => session.path === sessionPath)) {
-        throw new Error("The selected pi session is not available in the current project");
+        throw new Error("所选 pi 会话不属于当前项目或已不可用");
       }
       const result = await sendPiCommand({ type: "switch_session", sessionPath });
       if (!result?.cancelled) {
@@ -695,7 +742,7 @@ ipcMain.on("pi:command", async (_event, message) => {
       }
       return;
     }
-    if (message?.type === "auth:prompt-response") { const pending = authPrompts.get(payload.id); if (!pending) throw new Error("unknown or replayed auth prompt"); authPrompts.delete(payload.id); if (payload.cancelled) pending.reject(new Error("Authentication cancelled")); else pending.resolve(String(payload.value || "")); return; }
+    if (message?.type === "auth:prompt-response") { const pending = authPrompts.get(payload.id); if (!pending) throw new Error("身份验证请求未知或已处理"); authPrompts.delete(payload.id); if (payload.cancelled) pending.reject(new Error("身份验证已取消")); else pending.resolve(String(payload.value || "")); return; }
     if (message?.type === "auth:clear") {
       const runtime = await getAuthRuntime();
       const provider = String(payload.provider);
@@ -754,6 +801,8 @@ async function createWindow() {
     },
   });
 
+  installChineseMenu();
+
   mainWindow.once("ready-to-show", () => mainWindow?.show());
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -788,7 +837,7 @@ async function createWindow() {
     const message = String(err?.message || err).replace(/[<>&]/g, (ch) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[ch]));
     mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`
       <html><body style="background:#0d0d0d;color:#eee;font:14px system-ui;padding:32px">
-        <h2>Cagent could not load the interface</h2><p>${message}</p><p>Close the window and start the app again.</p>
+        <h2>Cagent 无法加载界面</h2><p>${message}</p><p>请关闭窗口后重新启动应用。</p>
       </body></html>
     `)}`);
   };

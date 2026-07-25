@@ -2,6 +2,16 @@
 
 ## 2026-07-25
 
+### Cagent 桌面界面中文化
+
+- 将聊天主界面、会话与设置侧栏、运行状态栏、Agent 控制台、工作区、Git、终端、资源中心、用量统计、权限弹窗和 Electron 加载失败页的应用自有文案改为简体中文。
+- 保留 Cagent、pi、Provider、Model、OAuth、API Key、MCP、Git、HTML、JSONL、Worktree 等技术名词以及用户内容、模型输出和命令输出原文。
+- 中文化仅调整显示层，不改动 IPC type、payload、运行时枚举和 pi RPC 协议。
+- 将 Electron 原生菜单改为“应用 / 编辑 / 视图 / 窗口”中文菜单，保留撤销、复制粘贴、缩放、全屏等桌面常用操作。
+- 补齐 pi RPC 未运行、超时、退出、会话不可用及身份验证取消等会进入 GUI 的应用自有错误文案。
+- 将空会话缺少名称和首条消息时的侧栏回退名称改为“新会话”。
+- 验证通过 `npm run build`、`node --check electron/main.cjs`、`git diff --check` 和 `npm run package`；桌面快捷方式仍直接指向当前仓库的 `release/win-unpacked/Cagent.exe`，并已从该快捷方式真实启动检查中文界面。
+
 ### 问题
 
 - 原工作台、资源、Usage 和 Agent 控制同时占用聊天流顶部，桌面空间不足且表单密集。

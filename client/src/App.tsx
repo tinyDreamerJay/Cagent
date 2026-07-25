@@ -23,7 +23,7 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
     if (this.state.error) {
       return (
         <div style={{ padding: 40, color: "#ff6b6b", fontFamily: "monospace", whiteSpace: "pre-wrap" }}>
-          <h2>Application Error</h2>
+          <h2>应用发生错误</h2>
           <p>{this.state.error.message}</p>
           <pre style={{ fontSize: 12, opacity: 0.7 }}>{this.state.error.stack}</pre>
         </div>
@@ -261,7 +261,7 @@ function App() {
     unsubs.push(subscribe("auth:status", (p: ProviderState[]) => { const states = Array.isArray(p) ? p : []; setProviderStates(states); setAvailableProviders(states.map((item) => item.provider)); setModelsByProvider(Object.fromEntries(states.filter((item) => item.models?.length).map((item) => [item.provider, item.models]))); }));
     unsubs.push(subscribe("mcp:list", (p: any[]) => setMcpServers(Array.isArray(p) ? p : [])));
     unsubs.push(subscribe("auth:oauth-status", (p: { message?: string }) => setStatusMsg(p?.message || "")));
-    unsubs.push(subscribe("auth:oauth-event", (p: any) => setStatusMsg(p?.event?.message || p?.event?.instructions || "OAuth in progress")));
+    unsubs.push(subscribe("auth:oauth-event", (p: any) => setStatusMsg(p?.event?.message || p?.event?.instructions || "OAuth 登录进行中")));
     unsubs.push(subscribe("auth:oauth-prompt", (p: any) => { setAuthPrompt(p); setAuthPromptValue(""); }));
 
     unsubs.push(
@@ -412,7 +412,7 @@ function App() {
         setMessages((prev) => {
           const next = [
             ...prev,
-            { id: `err-${Date.now()}`, role: "error" as const, text: `Error: ${msg}` },
+            { id: `err-${Date.now()}`, role: "error" as const, text: `错误：${msg}` },
           ];
           return next;
         });
@@ -574,13 +574,13 @@ function App() {
   const handleNewSession = () => {
     setMessages([]);
     setInput("");
-    setStatusMsg("Starting a new pi session...");
+    setStatusMsg("正在创建 pi 会话...");
     send("session:new");
   };
 
   const handleSessionSelect = (id: string) => {
     if (id !== activeSessionPath) {
-      setStatusMsg("Loading pi session...");
+      setStatusMsg("正在加载 pi 会话...");
       send("session:switch", { path: id });
     }
   };
@@ -600,13 +600,13 @@ function App() {
     <ErrorBoundary>
     <div className="app-container">
       {extensionRequest && (
-        <div className="extension-overlay" role="dialog" aria-modal="true" aria-label={extensionRequest.title || "Extension request"}>
+        <div className="extension-overlay" role="dialog" aria-modal="true" aria-label={extensionRequest.title || "扩展请求"}>
           <div className="extension-dialog">
-            <h2>{extensionRequest.title || "Extension request"}</h2>
+            <h2>{extensionRequest.title || "扩展请求"}</h2>
             {extensionRequest.message && <p>{extensionRequest.message}</p>}
             {extensionRequest.method === "select" && (
               <select value={extensionValue} onChange={(event) => setExtensionValue(event.target.value)}>
-                <option value="">Select an option</option>
+                <option value="">请选择</option>
                 {(extensionRequest.options || []).map((option: string) => <option key={option} value={option}>{option}</option>)}
               </select>
             )}
@@ -616,13 +616,13 @@ function App() {
                 : <input autoFocus value={extensionValue} onChange={(event) => setExtensionValue(event.target.value)} placeholder={extensionRequest.placeholder || ""} />
             )}
             <div className="extension-dialog-actions">
-              <button type="button" onClick={() => respondToExtension(undefined, true)}>Cancel</button>
-              {extensionRequest.method === "confirm" ? <><button type="button" onClick={() => respondToExtension(false)}>No</button><button type="button" onClick={() => respondToExtension(true)}>Yes</button></> : <button type="button" onClick={() => respondToExtension()}>Continue</button>}
+              <button type="button" onClick={() => respondToExtension(undefined, true)}>取消</button>
+              {extensionRequest.method === "confirm" ? <><button type="button" onClick={() => respondToExtension(false)}>否</button><button type="button" onClick={() => respondToExtension(true)}>是</button></> : <button type="button" onClick={() => respondToExtension()}>继续</button>}
             </div>
           </div>
         </div>
       )}
-      {authPrompt && <div className="extension-overlay" role="dialog" aria-modal="true" aria-label="Pi authentication"><div className="extension-dialog"><h2>Pi authentication</h2><p>{authPrompt.prompt?.message}</p><input autoFocus type={authPrompt.prompt?.type === "secret" ? "password" : "text"} value={authPromptValue} onChange={(event) => setAuthPromptValue(event.target.value)} placeholder={authPrompt.prompt?.placeholder || ""} /><div className="extension-dialog-actions"><button type="button" onClick={() => respondToAuthPrompt(true)}>Cancel</button><button type="button" onClick={() => respondToAuthPrompt(false)}>Continue</button></div></div></div>}
+      {authPrompt && <div className="extension-overlay" role="dialog" aria-modal="true" aria-label="pi 身份验证"><div className="extension-dialog"><h2>pi 身份验证</h2><p>{authPrompt.prompt?.message}</p><input autoFocus type={authPrompt.prompt?.type === "secret" ? "password" : "text"} value={authPromptValue} onChange={(event) => setAuthPromptValue(event.target.value)} placeholder={authPrompt.prompt?.placeholder || ""} /><div className="extension-dialog-actions"><button type="button" onClick={() => respondToAuthPrompt(true)}>取消</button><button type="button" onClick={() => respondToAuthPrompt(false)}>继续</button></div></div></div>}
       <Sidebar
         sessions={piSessions.map(session => ({
           id: session.path,
@@ -649,7 +649,7 @@ function App() {
         onOAuth={(nextProvider) => send("auth:oauth", { provider: nextProvider })}
         onClear={(nextProvider) => send("auth:clear", { provider: nextProvider })}
       />
-      {sidebarOpen && <button className="sidebar-overlay" type="button" aria-label="Close sessions" onClick={closeSidebar} />}
+      {sidebarOpen && <button className="sidebar-overlay" type="button" aria-label="关闭会话列表" onClick={closeSidebar} />}
 
       <main className="main-area">
         <header className="chat-header">
@@ -658,17 +658,17 @@ function App() {
             className="sidebar-toggle"
             type="button"
             onClick={() => sidebarOpen ? closeSidebar() : setSidebarOpen(true)}
-            aria-label="Toggle sessions"
+            aria-label="切换会话列表"
             aria-expanded={sidebarOpen}
             aria-controls="sessions-drawer"
           >
-            Sessions
+            会话
           </button>
-          <span className="chat-header-title">{runtimeState?.sessionName || "Untitled session"}</span>
+          <span className="chat-header-title">{runtimeState?.sessionName || "未命名会话"}</span>
           {statusMsg && (
             <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8 }}>{statusMsg}</span>
           )}
-          <button type="button" className="inspector-toggle" onClick={() => setInspectorOpen((value) => !value)} aria-expanded={inspectorOpen}>{inspectorOpen ? "Hide inspector" : "Inspector"}</button>
+          <button type="button" className="inspector-toggle" onClick={() => setInspectorOpen((value) => !value)} aria-expanded={inspectorOpen}>{inspectorOpen ? "隐藏检查器" : "检查器"}</button>
         </header>
 
         <RuntimeBar
@@ -701,7 +701,7 @@ function App() {
             <div className="welcome">
               <div className="welcome-title">Cagent</div>
               <div className="welcome-text">
-                {credentialReady ? "Start a session in this project." : "Add a credential in Settings to begin."}
+                {credentialReady ? "在当前项目中开始会话。" : "请先在设置中添加凭据。"}
               </div>
               {!credentialReady && initDone && (
                 <div className="welcome-hint">
@@ -709,7 +709,7 @@ function App() {
                     <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.5"/>
                     <text x="7" y="10" textAnchor="middle" fontSize="10" fill="currentColor">!</text>
                   </svg>
-                  Enter your API key in the sidebar to get started
+                  在侧栏输入 API Key 后即可开始
                 </div>
               )}
             </div>
@@ -726,9 +726,9 @@ function App() {
                         <img
                           key={i}
                           src={`data:${img.mimeType};base64,${img.data}`}
-                          alt={`attached image ${i + 1}`}
+                          alt={`附件图片 ${i + 1}`}
                           onClick={() => window.open(`data:${img.mimeType};base64,${img.data}`,'_blank')}
-                          title="click to view full size"
+                          title="点击查看原图"
                         />
                     ))}
                   </div>
@@ -738,7 +738,7 @@ function App() {
                     <span />
                   </span>
                 )}
-                {msg.thinking && <details className="thinking-block"><summary>Thinking</summary><pre>{msg.thinking}</pre></details>}
+                {msg.thinking && <details className="thinking-block"><summary>思考过程</summary><pre>{msg.thinking}</pre></details>}
                 {msg.toolCalls?.map((tc) => (
                   <div key={tc.id} className="tool-block">
                     <div
@@ -748,8 +748,8 @@ function App() {
                       <span className={`tool-block-icon ${tc.name || "tool"}`}>
                         {(tc.name || "tool")[0]?.toUpperCase()}
                       </span>
-                      <span style={{ flex: 1 }}>{tc.name}</span><span className={`tool-status ${tc.status || "done"}`}>{tc.status === "running" ? "running" : tc.status === "error" ? "failed" : "done"}</span>
-                      <span style={{ fontSize: 10 }}>{tc.collapsed ? "expand" : "collapse"}</span>
+                      <span style={{ flex: 1 }}>{tc.name}</span><span className={`tool-status ${tc.status || "done"}`}>{tc.status === "running" ? "运行中" : tc.status === "error" ? "失败" : "完成"}</span>
+                      <span style={{ fontSize: 10 }}>{tc.collapsed ? "展开" : "收起"}</span>
                     </div>
                     <div className={`tool-block-body ${tc.collapsed ? "collapsed" : ""}`}>
                       {tc.params && <div style={{ marginBottom: tc.result ? 8 : 0 }}>{tc.params}</div>}
@@ -786,12 +786,12 @@ function App() {
                 </div>
               ))}
               <div style={{ fontSize: 11, color: "var(--text-muted)", alignSelf: "center", marginLeft: 8 }}>
-                {pendingImagesRef.current.length} image(s) added - send to include
+                已添加 {pendingImagesRef.current.length} 张图片，发送消息时一并提交
               </div>
             </div>
           )}
           {slashMatches.length > 0 && (
-            <div className="slash-palette" role="listbox" aria-label="Pi commands">
+            <div className="slash-palette" role="listbox" aria-label="pi 命令">
               {slashMatches.map((command, index) => (
                 <button
                   key={`${command.source}-${command.name}`}
@@ -815,7 +815,7 @@ function App() {
               value={input}
               onChange={(e) => { setInput(e.target.value); setCommandIndex(0); }}
               onKeyDown={handleKeyDown}
-              placeholder={sending ? "Queue a steer or follow-up message..." : "Ask anything..."}
+              placeholder={sending ? "输入引导或后续消息..." : "输入消息..."}
               rows={1}
               disabled={!credentialReady || !initDone}
             />
@@ -823,7 +823,7 @@ function App() {
               className={`send-btn ${sending ? "sending" : ""}`}
               onClick={handleSend}
               disabled={(!input.trim() && pendingImagesRef.current.length === 0 && !sending) || !credentialReady || !initDone}
-              title={sending ? "Queue steering message" : "Send"}
+              title={sending ? "加入引导队列" : "发送"}
             >
               {sending ? (
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
@@ -842,17 +842,17 @@ function App() {
                 send("session:follow-up", { text, images: pendingImagesRef.current });
                 setInput("");
                 pendingImagesRef.current = [];
-              }} disabled={!input.trim()} title="Run after the current response settles">Follow-up</button>
-              <button className="queue-btn stop-btn" type="button" onClick={() => send("session:abort")} title="Stop generating">Stop</button>
+              }} disabled={!input.trim()} title="当前回复结束后发送">后续</button>
+              <button className="queue-btn stop-btn" type="button" onClick={() => send("session:abort")} title="停止生成">停止</button>
             </>}
           </div>
           {Object.entries(extensionWidgets).filter(([, widget]) => widget.placement === "belowEditor").map(([key, widget]) => <ExtensionWidget key={key} lines={widget.lines} />)}
         </div>
       </main>
-      {inspectorOpen && <aside className="inspector" aria-label="Inspector">
+      {inspectorOpen && <aside className="inspector" aria-label="检查器">
         <div className="inspector-tabs" role="tablist">
-          {(["files", "git", "terminal", "resources", "usage"] as const).map((tab) => <button key={tab} type="button" role="tab" aria-selected={inspectorTab === tab} className={inspectorTab === tab ? "active" : ""} onClick={() => setInspectorTab(tab)}>{tab}</button>)}
-          <button type="button" className="inspector-close" onClick={() => setInspectorOpen(false)} aria-label="Close inspector">x</button>
+          {(["files", "git", "terminal", "resources", "usage"] as const).map((tab) => <button key={tab} type="button" role="tab" aria-selected={inspectorTab === tab} className={inspectorTab === tab ? "active" : ""} onClick={() => setInspectorTab(tab)}>{{ files: "文件", git: "Git", terminal: "终端", resources: "资源", usage: "用量" }[tab]}</button>)}
+          <button type="button" className="inspector-close" onClick={() => setInspectorOpen(false)} aria-label="关闭检查器">x</button>
         </div>
         <div className="inspector-body">
           {(["files", "git", "terminal"] as string[]).includes(inspectorTab) && <WorkspacePanel view={inspectorTab as WorkspaceView} />}
