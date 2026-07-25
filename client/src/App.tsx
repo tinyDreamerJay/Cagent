@@ -135,7 +135,6 @@ function App() {
           setCwd(normalized);
         }
         setActiveSessionPath(p?.sessionFile || null);
-        send("auth:providers");
         send("auth:status");
         send("mcp:list");
         send("session:commands");

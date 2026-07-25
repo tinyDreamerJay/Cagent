@@ -198,6 +198,12 @@ async function publishPiMessages() {
   sendToRenderer("session:messages", toRendererMessages(result?.messages));
 }
 
+function publishProviderList() {
+  const providers = [...new Set(availableModels.map((model) => model.provider))];
+  sendToRenderer("auth:providers", providers);
+  return providers;
+}
+
 function handlePiEvent(event) {
   if (event.type === "message_update") {
     const delta = event.assistantMessageEvent;
@@ -407,8 +413,7 @@ async function initializeRendererSession() {
   availableModels = result?.models || [];
   activeSessionFile = state?.sessionFile || null;
   sendToRenderer("session:ready", { sessionId: state?.sessionId, sessionFile: state?.sessionFile, cwd: currentCwd });
-  const providers = [...new Set(availableModels.map((model) => model.provider))];
-  sendToRenderer("auth:providers", providers);
+  publishProviderList();
   // 为每个有模型的 provider 都发送 auth:key-ready，让前端看到所有可用模型
   const providersWithModels = new Map();
   for (const model of availableModels) {
@@ -647,7 +652,14 @@ ipcMain.on("pi:command", async (_event, message) => {
       }
       return;
     }
-    if (message?.type === "auth:providers") return await initializeRendererSession();
+    if (message?.type === "auth:providers") {
+      if (availableModels.length === 0) {
+        const result = await sendPiCommand({ type: "get_available_models" });
+        availableModels = result?.models || [];
+      }
+      publishProviderList();
+      return;
+    }
     if (message?.type === "auth:status") return await publishProviderStatus();
     if (message?.type === "mcp:list") {
       sendToRenderer("mcp:list", [{ status: "unsupported", source: "pi 0.81.1", error: "pi 0.81.1 文档明确不包含 built-in MCP，RPC 也无 MCP 事件或工具列表" }]);

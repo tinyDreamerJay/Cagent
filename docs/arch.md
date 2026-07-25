@@ -153,6 +153,8 @@ App
 3. ccswitch 配置通过 extension 和环境变量注入，不复制到 renderer
 4. GUI 通过 `get_state`、`get_available_models` 等 RPC 命令初始化
 
+`session:ready` 是一次初始化完成通知，不能触发新的完整初始化。Provider 列表已经随初始化下发；显式 `auth:providers` 查询只能刷新并发布 Provider 列表，不得再次调用 `initializeRendererSession()`，否则会形成 IPC 回环并持续占用 CPU 和内存。
+
 ### 发送 prompt 流程
 
 1. 主进程发送 `{ type: "prompt", message, images }`
