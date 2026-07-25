@@ -7,7 +7,6 @@ import { RuntimeBar, type RuntimeState } from "./components/RuntimeBar";
 import { AgentConsole } from "./components/AgentConsole";
 import { WorkspacePanel, type WorkspaceView } from "./components/WorkspacePanel";
 import { ResourceCenter, type PiResource } from "./components/ResourceCenter";
-import { UsagePanel } from "./components/UsagePanel";
 
 interface ProviderState { provider: string; configured: boolean; available: boolean; source: string; models: string[]; capabilities: { apiKey: boolean; oauth: boolean }; error?: string }
 
@@ -42,8 +41,8 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [inspectorOpen, setInspectorOpen] = useState(() => window.innerWidth > 760);
-  const [inspectorTab, setInspectorTab] = useState<"files" | "git" | "terminal" | "resources" | "usage">("files");
+  const [inspectorOpen, setInspectorOpen] = useState(() => window.innerWidth > 1360);
+  const [inspectorTab, setInspectorTab] = useState<"files" | "git" | "terminal" | "resources">("files");
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -57,6 +56,7 @@ function App() {
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [initDone, setInitDone] = useState(false);
   const pendingApiKeyRef = useRef<{ key: string; provider: string; mode: "stored" | "session" } | null>(null);
+  const configuredModelRef = useRef("");
   const [statusMsg, setStatusMsg] = useState("");
   const [stats, setStats] = useState<Record<string, unknown> | null>(null);
   const [commands, setCommands] = useState<{ name: string; description?: string; source: string }[]>([]);
@@ -77,6 +77,7 @@ function App() {
   const [runtimeState, setRuntimeState] = useState<RuntimeState | null>(null);
   const [thinkingLevels, setThinkingLevels] = useState<string[]>([]);
   const [piSessions, setPiSessions] = useState<{ id: string; path: string; name: string; updatedAt: number }[]>([]);
+  const [archivedSessions, setArchivedSessions] = useState<{ id: string; path: string; name: string; updatedAt: number }[]>([]);
   const [activeSessionPath, setActiveSessionPath] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -128,6 +129,7 @@ function App() {
     unsubs.push(
       subscribe("session:ready", (p: { cwd?: string; sessionFile?: string }) => {
         setInitDone(true);
+        configuredModelRef.current = "";
         setStatusMsg("");
         if (p?.cwd) {
           const normalized = p.cwd.replace(/\\/g, "/");
@@ -147,6 +149,7 @@ function App() {
         setPiSessions(Array.isArray(sessions) ? sessions : []);
       })
     );
+    unsubs.push(subscribe("session:archives", (sessions: { id: string; path: string; name: string; updatedAt: number }[]) => setArchivedSessions(Array.isArray(sessions) ? sessions : [])));
 
     unsubs.push(
       subscribe("session:messages", (nextMessages: Message[]) => {
@@ -159,6 +162,16 @@ function App() {
       subscribe("session:state", (p: RuntimeState) => {
         setRuntimeState(p);
         if (p?.cwd) setCwd(p.cwd.replace(/\\/g, "/"));
+        const stateModel = p?.model;
+        if (stateModel && typeof stateModel === "object") {
+          const model = stateModel as { provider?: string; id?: string };
+          if (model.provider && model.id) {
+            configuredModelRef.current = `${model.provider}:${model.id}`;
+            setProvider(model.provider);
+            setSelectedModel(model.id);
+            localStorage.setItem("cagent_provider", model.provider);
+          }
+        }
       })
     );
 
@@ -320,6 +333,7 @@ function App() {
         streamingTextRef.current = "";
         setSending(false);
         setStreaming(false);
+        send("session:stats");
         send("session:list");
       })
     );
@@ -421,6 +435,16 @@ function App() {
 
     return () => unsubs.forEach((u) => u());
   }, [subscribe, send, updateTool]);
+
+  useEffect(() => {
+    if (!initDone || !selectedModel) return;
+    const modelProvider = Object.entries(modelsByProvider).find(([, models]) => models.includes(selectedModel))?.[0] || provider;
+    if (!modelProvider) return;
+    const modelKey = `${modelProvider}:${selectedModel}`;
+    if (configuredModelRef.current === modelKey) return;
+    configuredModelRef.current = modelKey;
+    send("session:set-model", { provider: modelProvider, model: selectedModel });
+  }, [initDone, modelsByProvider, provider, selectedModel, send]);
 
   const handleSend = () => {
     const text = input.trim();
@@ -596,6 +620,12 @@ function App() {
     setExtensionValue("");
   };
 
+  const contextUsage = stats?.contextUsage && typeof stats.contextUsage === "object" ? stats.contextUsage as Record<string, unknown> : null;
+  const usedContextPercent = typeof contextUsage?.percent === "number" ? contextUsage.percent : null;
+  const remainingContextPercent = usedContextPercent === null ? null : Math.max(0, Math.min(100, 100 - usedContextPercent));
+  const contextWindow = typeof contextUsage?.contextWindow === "number" ? contextUsage.contextWindow.toLocaleString() : null;
+  const remainingContextLabel = remainingContextPercent === null ? "上下文剩余 --" : `上下文剩余 ${remainingContextPercent.toFixed(1)}%`;
+
   return (
     <ErrorBoundary>
     <div className="app-container">
@@ -629,9 +659,16 @@ function App() {
           name: session.name,
           date: new Date(session.updatedAt).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }),
         }))}
+        archivedSessions={archivedSessions.map(session => ({
+          id: session.path,
+          name: session.name,
+          date: new Date(session.updatedAt).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }),
+        }))}
         activeSession={activeSessionPath}
         onSessionSelect={handleSessionSelect}
         onNewSession={handleNewSession}
+        onSessionArchive={(id) => send("session:archive", { path: id })}
+        onSessionRestore={(id) => send("session:restore", { path: id })}
         onProviderSelect={(nextProvider) => { setProvider(nextProvider); localStorage.setItem("cagent_provider", nextProvider); setSelectedModel((modelsByProvider[nextProvider] || [])[0] || ""); }}
         apiKey={credentialReady ? "ready" : ""}
         provider={provider}
@@ -846,18 +883,18 @@ function App() {
               <button className="queue-btn stop-btn" type="button" onClick={() => send("session:abort")} title="停止生成">停止</button>
             </>}
           </div>
+          <div className="composer-footer"><span className={remainingContextPercent !== null && remainingContextPercent < 20 ? "context-low" : ""} title={usedContextPercent === null ? "发送第一条消息后显示上下文用量" : `已使用 ${usedContextPercent.toFixed(1)}%${contextWindow ? `，窗口 ${contextWindow} Token` : ""}`}>{remainingContextLabel}</span></div>
           {Object.entries(extensionWidgets).filter(([, widget]) => widget.placement === "belowEditor").map(([key, widget]) => <ExtensionWidget key={key} lines={widget.lines} />)}
         </div>
       </main>
       {inspectorOpen && <aside className="inspector" aria-label="检查器">
         <div className="inspector-tabs" role="tablist">
-          {(["files", "git", "terminal", "resources", "usage"] as const).map((tab) => <button key={tab} type="button" role="tab" aria-selected={inspectorTab === tab} className={inspectorTab === tab ? "active" : ""} onClick={() => setInspectorTab(tab)}>{{ files: "文件", git: "Git", terminal: "终端", resources: "资源", usage: "用量" }[tab]}</button>)}
+          {(["files", "git", "terminal", "resources"] as const).map((tab) => <button key={tab} type="button" role="tab" aria-selected={inspectorTab === tab} className={inspectorTab === tab ? "active" : ""} onClick={() => setInspectorTab(tab)}>{{ files: "文件", git: "Git", terminal: "终端", resources: "资源" }[tab]}</button>)}
           <button type="button" className="inspector-close" onClick={() => setInspectorOpen(false)} aria-label="关闭检查器">x</button>
         </div>
         <div className="inspector-body">
           {(["files", "git", "terminal"] as string[]).includes(inspectorTab) && <WorkspacePanel view={inspectorTab as WorkspaceView} />}
           {inspectorTab === "resources" && <ResourceCenter resources={resources} loading={resourcesLoading} error={resourcesError} onReload={() => { setResourcesLoading(true); send("session:resources"); }} onOpen={(resource) => window.cagent?.pi?.send("resource:open", { path: resource.path })} onExport={(format) => send(format === "html" ? "session:export-html" : "session:export-jsonl", {})} />}
-          {inspectorTab === "usage" && <UsagePanel stats={stats} onRefresh={() => send("session:stats")} />}
         </div>
       </aside>}
     </div>

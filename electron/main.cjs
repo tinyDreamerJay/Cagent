@@ -2,6 +2,7 @@ const { app, BrowserWindow, shell, ipcMain, screen, dialog, Menu } = require("el
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const readline = require("readline");
 const { pathToFileURL } = require("url");
 const { spawn, execFile } = require("child_process");
 const {
@@ -11,6 +12,7 @@ const {
   copyFileVerified,
 } = require("./resource-utils.cjs");
 const { mergeProviderStates, openAuthUrl } = require("./auth-management.cjs");
+const { archiveSessionFile, getProjectArchiveDir, restoreSessionFile } = require("./session-archive.cjs");
 
 // Suppress EPIPE errors when running with piped stdio
 process.stdout.on("error", () => {});
@@ -85,9 +87,23 @@ let restartingPi = false;
 const pendingPiRequests = new Map();
 let pendingGuiMessages = { steering: [], followUp: [] };
 let activeSessionFile = null;
+let activeThinkingLevel = "off";
 const resourceOpenWhitelist = new Set();
 let authRuntime = null;
 const authPrompts = new Map();
+
+async function readSessionThinkingLevel(sessionFile) {
+  if (!sessionFile || !fs.existsSync(sessionFile)) return "off";
+  let level = "off";
+  const lines = readline.createInterface({ input: fs.createReadStream(sessionFile, { encoding: "utf8" }), crlfDelay: Infinity });
+  for await (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      if (entry?.type === "thinking_level_change" && typeof entry.thinkingLevel === "string") level = entry.thinkingLevel;
+    } catch {}
+  }
+  return level;
+}
 async function getAuthRuntime() {
   if (!authRuntime) {
     const pi = await import("@earendil-works/pi-coding-agent");
@@ -224,20 +240,58 @@ function toRendererMessages(messages) {
 async function listPiSessions() {
   const piModule = await import(pathToFileURL(path.join(__dirname, "..", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js")).href);
   const sessions = await piModule.SessionManager.list(currentCwd);
-  return sessions.map((session) => ({
+  return sessions.map(toSessionSummary);
+}
+
+function toSessionSummary(session) {
+  return {
     id: session.path,
     path: session.path,
     name: session.name || session.firstMessage || "新会话",
     createdAt: session.created?.getTime?.() || 0,
     updatedAt: session.modified?.getTime?.() || 0,
     messageCount: session.messageCount || 0,
-  }));
+  };
+}
+
+async function listArchivedPiSessions() {
+  const archiveDir = getProjectArchiveDir(currentCwd);
+  if (!fs.existsSync(archiveDir)) return [];
+  const piModule = await import(pathToFileURL(path.join(__dirname, "..", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js")).href);
+  const sessions = await piModule.SessionManager.list(currentCwd, archiveDir);
+  return sessions.map(toSessionSummary);
 }
 
 async function publishPiSessions() {
-  const sessions = await listPiSessions();
+  const [sessions, archivedSessions] = await Promise.all([listPiSessions(), listArchivedPiSessions()]);
   sendToRenderer("session:list", sessions);
+  sendToRenderer("session:archives", archivedSessions);
   return sessions;
+}
+
+const sessionPathKey = (value) => path.resolve(String(value)).toLowerCase();
+
+async function archivePiSession(sessionPath) {
+  const sessions = await listPiSessions();
+  const session = sessions.find((item) => sessionPathKey(item.path) === sessionPathKey(sessionPath));
+  if (!session) throw new Error("所选会话不属于当前项目或已归档");
+
+  if (activeSessionFile && sessionPathKey(activeSessionFile) === sessionPathKey(session.path)) {
+    const result = await sendPiCommand({ type: "new_session" });
+    if (result?.cancelled) throw new Error("当前会话仍在运行，暂时无法归档");
+  }
+
+  archiveSessionFile(session.path, currentCwd);
+  await initializeRendererSession();
+}
+
+async function restorePiSession(sessionPath) {
+  const archivedSessions = await listArchivedPiSessions();
+  const session = archivedSessions.find((item) => sessionPathKey(item.path) === sessionPathKey(sessionPath));
+  if (!session) throw new Error("所选归档会话不存在");
+
+  restoreSessionFile(session.path, currentCwd);
+  await publishPiSessions();
 }
 
 async function publishPiMessages() {
@@ -459,6 +513,7 @@ async function initializeRendererSession() {
   const result = await sendPiCommand({ type: "get_available_models" });
   availableModels = result?.models || [];
   activeSessionFile = state?.sessionFile || null;
+  activeThinkingLevel = state?.thinkingLevel || await readSessionThinkingLevel(activeSessionFile);
   sendToRenderer("session:ready", { sessionId: state?.sessionId, sessionFile: state?.sessionFile, cwd: currentCwd });
   publishProviderList();
   // 为每个有模型的 provider 都发送 auth:key-ready，让前端看到所有可用模型
@@ -484,10 +539,16 @@ async function initializeRendererSession() {
 
 async function publishSessionState(state) {
   const currentState = state || await sendPiCommand({ type: "get_state" });
-  const levels = await sendPiCommand({ type: "get_available_thinking_levels" });
-  sendToRenderer("session:state", { ...currentState, cwd: currentCwd });
+  const [levels, stats] = await Promise.all([
+    sendPiCommand({ type: "get_available_thinking_levels" }),
+    sendPiCommand({ type: "get_session_stats" }),
+  ]);
+  const availableLevels = levels?.levels || [];
+  if (!availableLevels.includes(activeThinkingLevel)) activeThinkingLevel = availableLevels[0] || "off";
+  sendToRenderer("session:state", { ...currentState, thinkingLevel: activeThinkingLevel, cwd: currentCwd });
   sendToRenderer("session:queue", pendingGuiMessages);
-  sendToRenderer("session:thinking-levels", levels?.levels || []);
+  sendToRenderer("session:thinking-levels", availableLevels);
+  sendToRenderer("session:stats", stats || {});
   return currentState;
 }
 
@@ -552,8 +613,16 @@ ipcMain.on("pi:command", async (_event, message) => {
       }
       return;
     }
+    if (message?.type === "session:set-model") {
+      await sendPiCommand({ type: "set_model", provider: String(payload.provider || ""), modelId: String(payload.model || "") });
+      await publishSessionState();
+      return;
+    }
     if (message?.type === "session:set-thinking") {
+      const levels = await sendPiCommand({ type: "get_available_thinking_levels" });
+      if (!levels?.levels?.includes(payload.level)) throw new Error("当前模型不支持所选思考强度");
       await sendPiCommand({ type: "set_thinking_level", level: payload.level });
+      activeThinkingLevel = payload.level;
       await publishSessionState();
       return;
     }
@@ -686,6 +755,8 @@ ipcMain.on("pi:command", async (_event, message) => {
       return;
     }
     if (message?.type === "session:list") return await publishPiSessions();
+    if (message?.type === "session:archive") return await archivePiSession(String(payload.path || ""));
+    if (message?.type === "session:restore") return await restorePiSession(String(payload.path || ""));
     if (message?.type === "session:switch") {
       const sessionPath = String(payload.path || "");
       const sessions = await listPiSessions();
