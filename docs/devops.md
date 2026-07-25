@@ -46,11 +46,12 @@ npm run package    # electron-builder 打包
 
 ```text
 C:\Users\28584\Desktop\Cagent.lnk
-  -> D:\Cagent\launch-cagent.ps1
   -> D:\Cagent\release\win-unpacked\Cagent.exe
 ```
 
-`launch-cagent.ps1` 必须以 `D:\Cagent` 为工作目录启动应用；不得使用 `release/win-unpacked` 作为工作目录，否则文件树和 pi 会话会错误地落到发行目录。
+快捷方式的 `WorkingDirectory` 必须是 `D:\Cagent`；不得使用 `release/win-unpacked` 作为工作目录，否则文件树和 pi 会话会错误地落到发行目录。快捷方式必须直接启动 EXE，不得通过 `cmd.exe` 或 `powershell.exe` 中转，以免弹出或常驻额外控制台窗口。
+
+`launch-cagent.ps1` 仅保留为兼容入口，执行后立即启动 EXE 并退出；桌面快捷方式不再使用它。
 
 最终验收至少确认：主窗口来自上述 EXE、默认项目根目录正确、消息能收到模型回复、工具操作出现审批并可执行，以及 680x400 最小逻辑窗口没有重叠或水平溢出。浏览器/Vite 检查只能作为中间验证。
 
@@ -98,11 +99,11 @@ Windows 上解压会失败。**不影响 asar 打包**，只是无法生成安�
 
 ### 4120 端口
 
-当前 Electron 主链路不依赖 4120 端口。`launch-cagent.ps1` 仍会清理该端口，以免遗留 server 进程干扰本地环境；端口占用不应被当作 pi RPC 主链路故障的根因。
+当前 Electron 主链路不依赖 4120 端口，桌面启动流程也不会清理或占用该端口；端口占用不应被当作 pi RPC 主链路故障的根因。
 
 ### 单实例
 
-Electron 使用 single-instance lock；直接重复启动时，第二个实例退出并聚焦现有窗口。桌面启动脚本还会在启动前终止旧 `Cagent` 进程，因此从快捷方式启动会得到一个新的单实例进程。
+Electron 使用 single-instance lock；重复点击桌面快捷方式时，第二个实例退出并聚焦现有窗口，不需要启动脚本预先终止旧进程。
 
 ## 提交前检查
 
